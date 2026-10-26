@@ -1,0 +1,11 @@
+# Secretos y credenciales: nunca en el repositorio
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+*token*.txt
+

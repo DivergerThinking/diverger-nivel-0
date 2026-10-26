@@ -1,0 +1,31 @@
+name: worker-humo
+
+# Prueba de humo de EN-S0-01: un worker se autentica con la clave del secreto ANTHROPIC_API_KEY
+# y el gasto aparece en el workspace con límite mensual. Se lanza a mano y cuesta céntimos.
+# Va en .github/workflows/ de diverger-nivel-0 (infra/entornos/LEEME.md).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - run: npm install -g @anthropic-ai/claude-code@2.1.296
+      # Sin herramientas permitidas y en modo dontAsk: el worker solo puede responder.
+      - name: Worker
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude -p "Responde solo con la palabra OK." \
+            --model claude-haiku-5-5 --permission-mode dontAsk \
+            --max-turns 1 --max-budget-usd 0.10 --output-format json > salida.json
+          jq '{is_error, result, total_cost_usd}' salida.json
+          test "$(jq -r .is_error salida.json)" = "false"
