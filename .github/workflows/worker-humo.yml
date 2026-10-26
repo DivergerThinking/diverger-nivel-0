@@ -6,12 +6,19 @@ name: worker-humo
 
 on:
   workflow_dispatch:
+    inputs:
+      prueba:
+        description: Qué se comprueba
+        type: choice
+        options: [todo, worker, gcp]
+        default: todo
 
 permissions:
   contents: read
 
 jobs:
   worker:
+    if: inputs.prueba != 'gcp'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -29,3 +36,23 @@ jobs:
             --max-turns 1 --max-budget-usd 0.10 --output-format json > salida.json
           jq '{is_error, result, total_cost_usd}' salida.json
           test "$(jq -r .is_error salida.json)" = "false"
+
+  # El despliegue entra en GCP con un token de vida corta de Workload Identity Federation, sin
+  # claves de servicio. Solo comprueba el acceso: lista los servicios de Cloud Run y las imágenes.
+  gcp:
+    if: inputs.prueba != 'worker'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: Acceso a GCP
+        run: |
+          gcloud run services list --project "${{ vars.GCP_PROJECT_ID }}" --region "${{ vars.GCP_REGION }}"
+          gcloud artifacts docker images list "${{ vars.GCP_ARTIFACT_REPO }}"
