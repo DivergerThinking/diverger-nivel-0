@@ -79,7 +79,12 @@ jobs:
           service_account: ${{ vars.GCP_TELEMETRY_SA }}
       - name: Arrancar el Collector
         run: |
-          docker run -d --name otel -p 4317:4317 -p 13133:13133             -e GCP_PROJECT_ID -e GOOGLE_APPLICATION_CREDENTIALS=/credenciales.json             -v "$GOOGLE_APPLICATION_CREDENTIALS:/credenciales.json:ro"             -v "$PWD/.github/telemetria/collector.yaml:/etc/otelcol/config.yaml:ro"             "$COLLECTOR_IMAGE" --config=/etc/otelcol/config.yaml
+          # Con el usuario del runner: el fichero de credenciales solo lo puede leer él.
+          docker run -d --name otel --user "$(id -u):$(id -g)" -p 4317:4317 -p 13133:13133 \
+            -e GCP_PROJECT_ID -e GOOGLE_APPLICATION_CREDENTIALS=/credenciales.json \
+            -v "$GOOGLE_APPLICATION_CREDENTIALS:/credenciales.json:ro" \
+            -v "$PWD/.github/telemetria/collector.yaml:/etc/otelcol/config.yaml:ro" \
+            "$COLLECTOR_IMAGE" --config=/etc/otelcol/config.yaml
           for i in $(seq 30); do curl -sf localhost:13133 >/dev/null && exit 0; sleep 2; done
           docker logs otel; exit 1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -104,7 +109,9 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          claude -p "Responde solo con la palabra OK."             --model claude-haiku-5-5 --permission-mode dontAsk             --max-turns 1 --max-budget-usd 0.10 --output-format json > salida.json
+          claude -p "Responde solo con la palabra OK." \
+            --model claude-haiku-5-5 --permission-mode dontAsk \
+            --max-turns 1 --max-budget-usd 0.10 --output-format json > salida.json
           jq '{is_error, result, total_cost_usd, session_id}' salida.json
           test "$(jq -r .is_error salida.json)" = "false"
       # Parar el Collector con margen manda lo que tenga pendiente.
