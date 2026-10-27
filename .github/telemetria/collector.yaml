@@ -1,0 +1,43 @@
+# OpenTelemetry Collector de cada job (EN-TEL-01): recibe la telemetría de Claude Code por OTLP y
+# manda los eventos a Cloud Logging (log «claude-code», que un sink copia a BigQuery) y las
+# métricas a Cloud Monitoring. Corre en el propio runner, sin endpoint público.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  # El correo de la persona no sale del runner: basta con los identificadores anónimos.
+  attributes/privacidad:
+    actions:
+      - key: user.email
+        action: delete
+  resource/privacidad:
+    attributes:
+      - key: user.email
+        action: delete
+  batch:
+    timeout: 5s
+
+exporters:
+  googlecloud:
+    project: ${env:GCP_PROJECT_ID}
+    log:
+      default_log_name: claude-code
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [resource/privacidad, attributes/privacidad, batch]
+      exporters: [googlecloud]
+    metrics:
+      receivers: [otlp]
+      processors: [resource/privacidad, attributes/privacidad, batch]
+      exporters: [googlecloud]
