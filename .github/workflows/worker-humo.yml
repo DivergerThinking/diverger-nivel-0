@@ -10,7 +10,7 @@ on:
       prueba:
         description: Qué se comprueba
         type: choice
-        options: [todo, worker, gcp]
+        options: [todo, worker, gcp, telemetria, telemetria-repo]
         default: todo
 
 permissions:
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   worker:
-    if: inputs.prueba != 'gcp'
+    if: inputs.prueba == 'todo' || inputs.prueba == 'worker'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -40,7 +40,7 @@ jobs:
   # El despliegue entra en GCP con un token de vida corta de Workload Identity Federation, sin
   # claves de servicio. Solo comprueba el acceso: lista los servicios de Cloud Run y las imágenes.
   gcp:
-    if: inputs.prueba != 'worker'
+    if: inputs.prueba == 'todo' || inputs.prueba == 'gcp'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -56,3 +56,69 @@ jobs:
         run: |
           gcloud run services list --project "${{ vars.GCP_PROJECT_ID }}" --region "${{ vars.GCP_REGION }}"
           gcloud artifacts docker images list "${{ vars.GCP_ARTIFACT_REPO }}"
+
+  # Telemetría de Claude Code hacia GCP (EN-TEL-01). Un Collector corre en el propio runner y entra
+  # en GCP como diverger-telemetry, que solo puede escribir logs y métricas. Con «telemetria» las
+  # variables del exportador van en la configuración gestionada; con «telemetria-repo», solo en el
+  # .claude/settings.json del repo, que Claude Code ignora: no debe llegar ningún evento.
+  telemetria:
+    if: inputs.prueba == 'telemetria' || inputs.prueba == 'telemetria-repo'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      COLLECTOR_IMAGE: us-docker.pkg.dev/cloud-ops-agents-artifacts/google-cloud-opentelemetry-collector/otelcol-google:0.163.1
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_TELEMETRY_SA }}
+      - name: Arrancar el Collector
+        run: |
+          # Con el usuario del runner: el fichero de credenciales solo lo puede leer él.
+          docker run -d --name otel --user "$(id -u):$(id -g)" -p 4317:4317 -p 13133:13133 \
+            -e GCP_PROJECT_ID -e GOOGLE_APPLICATION_CREDENTIALS=/credenciales.json \
+            -v "$GOOGLE_APPLICATION_CREDENTIALS:/credenciales.json:ro" \
+            -v "$PWD/.github/telemetria/collector.yaml:/etc/otelcol/config.yaml:ro" \
+            "$COLLECTOR_IMAGE" --config=/etc/otelcol/config.yaml
+          for i in $(seq 30); do curl -sf localhost:13133 >/dev/null && exit 0; sleep 2; done
+          docker logs otel; exit 1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - run: npm install -g @anthropic-ai/claude-code@2.1.296
+      # Cada ejecución lleva su identificador en los atributos, para encontrar sus eventos.
+      - name: Variables del exportador
+        env:
+          PRUEBA: ${{ inputs.prueba }}
+        run: |
+          atributos="diverger.prueba=$PRUEBA,github.run_id=$GITHUB_RUN_ID,github.repository=$GITHUB_REPOSITORY"
+          ajustes="$(jq --arg a "$atributos" '.env.OTEL_RESOURCE_ATTRIBUTES = $a' .github/telemetria/managed-settings.json)"
+          if [ "$PRUEBA" = telemetria ]; then
+            sudo mkdir -p /etc/claude-code
+            echo "$ajustes" | sudo tee /etc/claude-code/managed-settings.json >/dev/null
+          else
+            mkdir -p .claude
+            echo "$ajustes" > .claude/settings.json
+          fi
+      - name: Worker
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude -p "Responde solo con la palabra OK." \
+            --model claude-haiku-5-5 --permission-mode dontAsk \
+            --max-turns 1 --max-budget-usd 0.10 --output-format json > salida.json
+          jq '{is_error, result, total_cost_usd, session_id}' salida.json
+          test "$(jq -r .is_error salida.json)" = "false"
+      # Parar el Collector con margen manda lo que tenga pendiente.
+      - name: Vaciar el Collector
+        if: always()
+        run: |
+          sleep 10
+          docker stop -t 30 otel
+          docker logs otel 2>&1 | tail -40
+          echo "Buscar en BigQuery por github.run_id=$GITHUB_RUN_ID"
