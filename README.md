@@ -12,3 +12,4 @@ Repo de pruebas del nivel 0 del harness Diverger ExP (préstamo de equipos míni
 La preparación de los entornos está en `infra/entornos/LEEME.md` de [Diverger-ExP-Harness](https://github.com/DivergerThinking/Diverger-ExP-Harness).
 
 Es público a propósito: con el plan Free de GitHub, las protecciones de rama solo funcionan en repositorios públicos ([ADR 0001](https://github.com/DivergerThinking/Diverger-ExP-Harness/blob/main/docs/adr/0001-repos-de-prueba-publicos.md), en un repositorio privado). No contiene datos ni credenciales.
+- `.diverger/prueba-bucle/`, `spec/` y `tests/aceptacion/`: un plan de prueba con tres tareas independientes (TA-001 a TA-003) para comprobar el bucle desatendido (HU-EJE-01). Se sustituyen cuando el nivel 0 tenga su aplicación.

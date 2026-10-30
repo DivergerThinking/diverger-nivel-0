@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "initiative": {
+    "id": "prueba-bucle",
+    "title": "Prueba del bucle desatendido",
+    "language": "es",
+    "vision": "Comprobar que el bucle lanza un worker por tarea y reanuda sin repetir lo hecho."
+  },
+  "epics": [
+    {
+      "id": "EP-01",
+      "title": "Prueba del bucle",
+      "description": "Tres tareas independientes."
+    }
+  ],
+  "stories": [
+    {
+      "id": "HU-001",
+      "epic": "EP-01",
+      "kind": "story",
+      "title": "Prestar un equipo",
+      "role": "socio",
+      "goal": "prestar un equipo",
+      "benefit": "probar el bucle desatendido",
+      "acceptanceCriteria": [
+        {
+          "type": "positive",
+          "given": "el equipo «Tienda 4 plazas»",
+          "when": "la socia Ana Pérez quiere prestar un equipo",
+          "then": "la aplicación lo permite"
+        },
+        {
+          "type": "negative",
+          "given": "el equipo «Hornillo» dado de baja",
+          "when": "la socia Ana Pérez quiere prestar un equipo",
+          "then": "la aplicación responde «El equipo no está disponible»"
+        }
+      ],
+      "priority": "must",
+      "estimate": {
+        "size": "S",
+        "hours": 2
+      },
+      "status": "approved",
+      "blockedBy": []
+    },
+    {
+      "id": "HU-002",
+      "epic": "EP-01",
+      "kind": "story",
+      "title": "Devolver un equipo",
+      "role": "socio",
+      "goal": "devolver un equipo",
+      "benefit": "probar el bucle desatendido",
+      "acceptanceCriteria": [
+        {
+          "type": "positive",
+          "given": "el equipo «Tienda 4 plazas»",
+          "when": "la socia Ana Pérez quiere devolver un equipo",
+          "then": "la aplicación lo permite"
+        },
+        {
+          "type": "negative",
+          "given": "el equipo «Hornillo» dado de baja",
+          "when": "la socia Ana Pérez quiere devolver un equipo",
+          "then": "la aplicación responde «El equipo no está disponible»"
+        }
+      ],
+      "priority": "must",
+      "estimate": {
+        "size": "S",
+        "hours": 2
+      },
+      "status": "approved",
+      "blockedBy": []
+    },
+    {
+      "id": "HU-003",
+      "epic": "EP-01",
+      "kind": "story",
+      "title": "Ver los equipos disponibles",
+      "role": "socio",
+      "goal": "ver los equipos disponibles",
+      "benefit": "probar el bucle desatendido",
+      "acceptanceCriteria": [
+        {
+          "type": "positive",
+          "given": "el equipo «Tienda 4 plazas»",
+          "when": "la socia Ana Pérez quiere ver los equipos disponibles",
+          "then": "la aplicación lo permite"
+        },
+        {
+          "type": "negative",
+          "given": "el equipo «Hornillo» dado de baja",
+          "when": "la socia Ana Pérez quiere ver los equipos disponibles",
+          "then": "la aplicación responde «El equipo no está disponible»"
+        }
+      ],
+      "priority": "must",
+      "estimate": {
+        "size": "S",
+        "hours": 2
+      },
+      "status": "approved",
+      "blockedBy": []
+    }
+  ],
+  "tasks": [],
+  "team": [],
+  "sprints": [],
+  "assumptions": [],
+  "openQuestions": []
+}
