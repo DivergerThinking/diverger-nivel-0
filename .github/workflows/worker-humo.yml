@@ -167,7 +167,7 @@ jobs:
           if gh api "repos/$repo/pulls/$pr/reviews" -f event=APPROVE >salida.json 2>error.txt; then
             echo "La identidad del harness ha podido aprobar su propia PR"; exit 1
           fi
-          echo "Aprobación rechazada, como se espera: $(cat error.txt)"
+          echo "Aprobación rechazada, como se espera: $(jq -r '.message + " " + ((.errors // []) | join(" "))' salida.json 2>/dev/null || cat error.txt)"
           if [ "$DEJAR_ABIERTA" != "true" ]; then
             gh api -X PATCH "repos/$repo/pulls/$pr" -f state=closed >/dev/null
             gh api -X DELETE "repos/$repo/git/refs/heads/$rama"
