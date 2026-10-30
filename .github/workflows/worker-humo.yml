@@ -10,10 +10,10 @@ on:
       prueba:
         description: Qué se comprueba
         type: choice
-        options: [todo, worker, gcp, telemetria, telemetria-repo, identidad]
+        options: [todo, worker, gcp, telemetria, telemetria-repo, identidad, codeowners]
         default: todo
       dejar-abierta:
-        description: Con «identidad», deja abierta la PR de prueba para aprobarla a mano
+        description: Con «identidad» o «codeowners», deja abierta la PR de prueba para aprobarla a mano
         type: boolean
         default: false
 
@@ -168,6 +168,85 @@ jobs:
             echo "La identidad del harness ha podido aprobar su propia PR"; exit 1
           fi
           echo "Aprobación rechazada, como se espera: $(jq -r '.message + " " + ((.errors // []) | join(" "))' salida.json 2>/dev/null || cat error.txt)"
+          if [ "$DEJAR_ABIERTA" != "true" ]; then
+            gh api -X PATCH "repos/$repo/pulls/$pr" -f state=closed >/dev/null
+            gh api -X DELETE "repos/$repo/git/refs/heads/$rama"
+            echo "PR #$pr cerrada y rama borrada"
+          fi
+
+  # CODEOWNERS sobre la configuración (EN-OPS-04, ADR 0014). Con la identidad del harness, como lo
+  # haría un agente: intenta cambiar el modo de «checkpoints» a «yolo» con un push directo a main,
+  # que el ruleset tiene que rechazar, y después con una PR, que tiene que quedar pendiente de la
+  # revisión del titular y no poder integrarse. Sin «dejar-abierta», cierra la PR al terminar.
+  codeowners:
+    if: inputs.prueba == 'codeowners'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: token
+        with:
+          app-id: ${{ vars.DIVERGER_HARNESS_APP_ID }}
+          private-key: ${{ secrets.DIVERGER_HARNESS_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+      - name: Push directo y PR que cambian el modo
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          LANZADO_POR: ${{ github.actor }}
+          DEJAR_ABIERTA: ${{ inputs.dejar-abierta }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          fichero=.diverger/settings.json
+          # GitHub valida CODEOWNERS por su cuenta: un propietario sin acceso o una línea mal escrita no protegen.
+          errores=$(gh api "repos/$repo/codeowners/errors" -q '.errors | length')
+          test "$errores" = 0 || { gh api "repos/$repo/codeowners/errors"; exit 1; }
+          titular=$(gh api "repos/$repo/contents/.github/CODEOWNERS" -q .content | base64 -d \
+            | awk -v f="/$fichero" '$1 == f { sub("^@", "", $2); print $2 }' | tail -1)
+          echo "Titular de $fichero en CODEOWNERS: $titular"
+          test -n "$titular"
+          sha=$(gh api "repos/$repo/contents/$fichero?ref=main" -q .sha)
+          gh api "repos/$repo/contents/$fichero?ref=main" -q .content | base64 -d > actual.json
+          test "$(jq -r .mode actual.json)" = checkpoints
+          yolo=$(jq '.mode = "yolo"' actual.json | base64 -w0)
+
+          # Criterio negativo: el push directo a main no entra y el fichero sigue igual.
+          if gh api -X PUT "repos/$repo/contents/$fichero" -f branch=main -f sha="$sha" \
+            -f message="test: push directo que cambia el modo (EN-OPS-04)" -f content="$yolo" >salida.json 2>error.txt; then
+            echo "El push directo a main ha entrado"; exit 1
+          fi
+          echo "Push directo rechazado, como se espera: $(jq -r '.message // empty' salida.json 2>/dev/null) $(cat error.txt)"
+          test "$(gh api "repos/$repo/contents/$fichero?ref=main" -q .sha)" = "$sha"
+          echo "$fichero sigue como estaba en main"
+
+          # Criterio positivo: la PR queda pendiente del titular y no se puede integrar.
+          rama="prueba/codeowners-$GITHUB_RUN_ID"
+          base=$(gh api "repos/$repo/git/ref/heads/main" -q .object.sha)
+          gh api "repos/$repo/git/refs" -f ref="refs/heads/$rama" -f sha="$base" >/dev/null
+          gh api -X PUT "repos/$repo/contents/$fichero" -f branch="$rama" -f sha="$sha" \
+            -f message="test: cambia el modo a yolo (EN-OPS-04)" -f content="$yolo" >/dev/null
+          pr=$(gh api "repos/$repo/pulls" -f head="$rama" -f base=main \
+            -f title="Prueba de CODEOWNERS: modo yolo ($GITHUB_RUN_ID)" \
+            -f body="Lanzado por @$LANZADO_POR. No se integra. Ejecución: $GITHUB_SERVER_URL/$repo/actions/runs/$GITHUB_RUN_ID" -q .number)
+          echo "PR #$pr abierta por $(gh api "repos/$repo/pulls/$pr" -q .user.login)"
+          revisores=""
+          for i in $(seq 20); do
+            revisores=$(gh api "repos/$repo/pulls/$pr/requested_reviewers" -q '.users[].login')
+            grep -qx "$titular" <<<"$revisores" && break
+            sleep 3
+          done
+          echo "Revisión pedida a: ${revisores:-nadie}"
+          grep -qx "$titular" <<<"$revisores"
+          decision=$(gh pr view "$pr" -R "$repo" --json reviewDecision -q .reviewDecision)
+          echo "Decisión de revisión: $decision"
+          test "$decision" = REVIEW_REQUIRED
+          if gh api -X PUT "repos/$repo/pulls/$pr/merge" >salida.json 2>error.txt; then
+            echo "La PR se ha integrado sin la aprobación del titular"; exit 1
+          fi
+          echo "Integración rechazada, como se espera: $(jq -r '.message // empty' salida.json 2>/dev/null) $(cat error.txt)"
           if [ "$DEJAR_ABIERTA" != "true" ]; then
             gh api -X PATCH "repos/$repo/pulls/$pr" -f state=closed >/dev/null
             gh api -X DELETE "repos/$repo/git/refs/heads/$rama"

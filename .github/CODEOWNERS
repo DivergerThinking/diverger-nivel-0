@@ -1,0 +1,4 @@
+# Lo que los agentes no deben cambiar sin el titular (EN-OPS-04, ADR 0014 del harness). El ruleset
+# «codeowners» exige su aprobación en cualquier PR que toque estos ficheros, también en modo yolo.
+/.diverger/settings.json @joselcs
+/.github/CODEOWNERS @joselcs
