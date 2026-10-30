@@ -10,12 +10,16 @@ on:
       prueba:
         description: Qué se comprueba
         type: choice
-        options: [todo, worker, gcp, telemetria, telemetria-repo, identidad, codeowners]
+        options: [todo, worker, gcp, telemetria, telemetria-repo, identidad, codeowners, despliegue-worker]
         default: todo
       dejar-abierta:
         description: Con «identidad» o «codeowners», deja abierta la PR de prueba para aprobarla a mano
         type: boolean
         default: false
+      servicio:
+        description: Con «despliegue-worker», el servicio de Cloud Run de staging que el worker intenta cambiar
+        type: string
+        default: golden-path
 
 permissions:
   contents: read
@@ -43,10 +47,13 @@ jobs:
 
   # El despliegue entra en GCP con un token de vida corta de Workload Identity Federation, sin
   # claves de servicio. Solo comprueba el acceso: lista los servicios de Cloud Run y las imágenes.
+  # La cuenta de despliegue solo acepta jobs del environment staging (EN-FM-04, ADR 0015), que solo
+  # admite main: se lanza desde main.
   gcp:
     if: inputs.prueba == 'todo' || inputs.prueba == 'gcp'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    environment: staging
     permissions:
       contents: read
       id-token: write
@@ -268,3 +275,98 @@ jobs:
             gh api -X DELETE "repos/$repo/git/refs/heads/$rama"
             echo "PR #$pr cerrada y rama borrada"
           fi
+
+  # Criterio negativo de EN-FM-04 (RQ.034, ADR 0015): un worker no puede desplegar en staging. El job
+  # «despliegue-worker» es como el de un worker: sin environment y con id-token, que necesita para la
+  # telemetría (ADR 0007). Intenta desplegar en el servicio de staging sin credenciales y después con
+  # un token de GitHub a nombre de la cuenta de despliegue; los dos intentos tienen que fallar. Para
+  # que un fallo de la prueba no cambie nada, despliega la misma imagen que ya tiene el servicio. Antes
+  # y después, un job del environment staging lee la última revisión: tiene que seguir siendo la misma.
+  despliegue-antes:
+    if: inputs.prueba == 'despliegue-worker'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      revision: ${{ steps.leer.outputs.revision }}
+      imagen: ${{ steps.leer.outputs.imagen }}
+    steps:
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: Versión de staging antes del intento
+        id: leer
+        env:
+          SERVICIO: ${{ inputs.servicio }}
+        run: |
+          servicio() { gcloud run services describe "$SERVICIO" --project "${{ vars.GCP_PROJECT_ID }}" --region "${{ vars.GCP_REGION }}" --format "value($1)"; }
+          revision=$(servicio status.latestReadyRevisionName)
+          imagen=$(servicio 'spec.template.spec.containers[0].image')
+          echo "Staging antes: $revision con $imagen"
+          test -n "$revision" && test -n "$imagen"
+          { echo "revision=$revision"; echo "imagen=$imagen"; } >> "$GITHUB_OUTPUT"
+
+  despliegue-worker:
+    needs: despliegue-antes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      SERVICIO: ${{ inputs.servicio }}
+      IMAGEN: ${{ needs.despliegue-antes.outputs.imagen }}
+    steps:
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: Desplegar sin credenciales
+        run: |
+          if gcloud run deploy "$SERVICIO" --image "$IMAGEN" --project "${{ vars.GCP_PROJECT_ID }}" \
+              --region "${{ vars.GCP_REGION }}" --quiet 2>error.txt; then
+            echo "::error::El worker ha desplegado en staging sin credenciales"; exit 1
+          fi
+          echo "Rechazado, como se espera: $(tail -3 error.txt)"
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - name: Desplegar con un token de GitHub fuera del environment staging
+        run: |
+          for orden in "gcloud run deploy $SERVICIO --image $IMAGEN" "gcloud deploy releases list --delivery-pipeline $SERVICIO"; do
+            if $orden --project "${{ vars.GCP_PROJECT_ID }}" --region "${{ vars.GCP_REGION }}" --quiet 2>error.txt; then
+              echo "::error::El worker ha usado la cuenta de despliegue: $orden"; exit 1
+            fi
+            echo "Rechazado, como se espera ($orden): $(tail -3 error.txt)"
+            grep -Eq "iam.serviceAccounts.getAccessToken|PERMISSION_DENIED|403" error.txt
+          done
+
+  despliegue-despues:
+    needs: [despliegue-antes, despliegue-worker]
+    if: always() && needs.despliegue-antes.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: Staging sigue con la versión anterior
+        env:
+          SERVICIO: ${{ inputs.servicio }}
+          ANTES: ${{ needs.despliegue-antes.outputs.revision }}
+          WORKER: ${{ needs.despliegue-worker.result }}
+        run: |
+          despues=$(gcloud run services describe "$SERVICIO" --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.GCP_REGION }}" --format 'value(status.latestReadyRevisionName)')
+          echo "Staging antes: $ANTES; después: $despues; intentos del worker: $WORKER"
+          test "$despues" = "$ANTES"
+          test "$WORKER" = success
