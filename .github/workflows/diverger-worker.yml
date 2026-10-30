@@ -6,10 +6,16 @@ run-name: diverger-worker ${{ inputs.task }} ${{ inputs.run }}
 # una PR abierta desde diverger/<iniciativa>/<tarea> que marca la tarea como hecha. Fallo: termina
 # sin PR y su resumen dice por qué.
 #
-# Lo que el worker no tiene (RQ.034): credenciales de despliegue (ni id-token ni cuentas de GCP), el
-# token del bucle ni permiso para lanzar otros workers. El modelo trabaja sin ningún token de GitHub:
-# la rama, el commit y la PR los hace el job después, con un token de la GitHub App diverger-harness
-# que solo puede escribir contenido y PR.
+# Lo que el worker no tiene (RQ.034): credenciales de despliegue, el token del bucle ni permiso para
+# lanzar otros workers. El modelo trabaja sin ningún token de GitHub: la rama, el commit y la PR los
+# hace el job después, con un token de la GitHub App diverger-harness que solo puede escribir
+# contenido y PR.
+#
+# Telemetría (ADR 0007 del harness): si el repositorio tiene GCP_WIF_PROVIDER y GCP_TELEMETRY_SA, el
+# job arranca un OpenTelemetry Collector en el runner con la cuenta diverger-telemetry, que solo
+# escribe logs y métricas. Para eso tiene id-token: write. En GCP, esa cuenta solo la aceptan este
+# workflow y worker-humo.yml, y la de despliegue solo el environment staging, que este job no usa: con
+# su token, el worker no puede desplegar.
 #
 # Hasta que exista el worker que implementa la tarea (EN-FM-02, diverger-dev), el paso «Worker» es
 # un worker de prueba: intenta una herramienta que no tiene permitida, marca su tarea como hecha y
@@ -45,6 +51,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      id-token: write # Solo para la cuenta de telemetría (ADR 0007).
     env:
       INICIATIVA: ${{ inputs.initiative }}
       TAREA: ${{ inputs.task }}
@@ -53,6 +60,10 @@ jobs:
       MODELO: ${{ vars.DIVERGER_WORKER_MODEL || 'claude-haiku-5-5' }}
       MAX_TURNOS: ${{ vars.DIVERGER_WORKER_MAX_TURNS || '10' }}
       MAX_USD: ${{ vars.DIVERGER_WORKER_MAX_BUDGET_USD || '0.50' }}
+      # Telemetría: solo si el repositorio tiene las dos variables.
+      TELEMETRIA: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_TELEMETRY_SA != '' }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      COLLECTOR_IMAGE: us-docker.pkg.dev/cloud-ops-agents-artifacts/google-cloud-opentelemetry-collector/otelcol-google:0.163.1
     steps:
       # Las entradas llegan de fuera: se comprueban antes de usarlas y nunca se pegan en un script.
       - name: Comprobar las entradas
@@ -91,6 +102,39 @@ jobs:
           node-version: "22"
       - run: npm install -g @anthropic-ai/claude-code@2.1.296
 
+      # Telemetría (ADR 0007). La cuenta de telemetría solo escribe logs y métricas; la configuración
+      # del Collector y del exportador sale del checkout de la rama base, no del worktree del modelo.
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        if: env.TELEMETRIA == 'true'
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_TELEMETRY_SA }}
+
+      - name: Arrancar el Collector
+        if: env.TELEMETRIA == 'true'
+        run: |
+          fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
+          # Con el usuario del runner: el fichero de credenciales solo lo puede leer él.
+          docker run -d --name otel --user "$(id -u):$(id -g)" -p 4317:4317 -p 13133:13133 \
+            -e GCP_PROJECT_ID -e GOOGLE_APPLICATION_CREDENTIALS=/credenciales.json \
+            -v "$GOOGLE_APPLICATION_CREDENTIALS:/credenciales.json:ro" \
+            -v "$PWD/.github/telemetria/collector.yaml:/etc/otelcol/config.yaml:ro" \
+            "$COLLECTOR_IMAGE" --config=/etc/otelcol/config.yaml
+          for _ in $(seq 30); do curl -sf localhost:13133 >/dev/null && exit 0; sleep 2; done
+          docker logs otel
+          fallar "El Collector de la telemetría no arranca"
+
+      # Claude Code solo lee las variables del exportador de la configuración gestionada, no del
+      # repositorio. Cada ejecución lleva sus identificadores para encontrar sus eventos.
+      - name: Configuración gestionada
+        if: env.TELEMETRIA == 'true'
+        run: |
+          atributos="github.run_id=$GITHUB_RUN_ID,github.repository=$GITHUB_REPOSITORY,diverger.task=$TAREA,diverger.run=$EJECUCION"
+          sudo mkdir -p /etc/claude-code
+          jq --arg a "$atributos" '.env.OTEL_RESOURCE_ATTRIBUTES = $a' .github/telemetria/managed-settings.json \
+            | sudo tee /etc/claude-code/managed-settings.json >/dev/null
+          echo "Telemetría en BigQuery con github.run_id=$GITHUB_RUN_ID"
+
       # El modelo solo tiene la clave de Anthropic. Permisos:
       # - dontAsk: todo lo que no está permitido se deniega sin preguntar y el worker sigue sin ello.
       # - --tools: las únicas herramientas que existen; sin WebFetch ni WebSearch, el modelo no sale
@@ -113,6 +157,10 @@ jobs:
           2. Con Edit, en $FICHERO_TAREA, cambia \"status\": \"pending\" por \"status\": \"done\". No toques nada más del fichero.
           3. Con Write, crea pruebas/worker/$TAREA.md con una sola línea: Cambio de prueba del worker, ejecución $EJECUCION.
           Termina con una sola línea: HECHO."
+          # El modelo no necesita pedir tokens de GitHub ni de GCP: se le quitan del entorno. Aunque
+          # los consiguiera, solo valen para la cuenta de telemetría, que solo escribe logs y métricas.
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL GOOGLE_APPLICATION_CREDENTIALS \
+            CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE GOOGLE_GHA_CREDS_PATH
           set +e
           claude -p "$instrucciones" \
             --model "$MODELO" --permission-mode dontAsk \
@@ -211,6 +259,17 @@ jobs:
           echo "$url" > "$RUNNER_TEMP/pr"
           echo "PR abierta: $url"
 
+      # Parar el Collector con margen manda lo que tenga pendiente. Corre siempre, también si el job
+      # falla o se salta la telemetría (entonces no hay Collector y no hace nada).
+      - name: Parar el Collector
+        if: always()
+        run: |
+          docker inspect otel >/dev/null 2>&1 || { echo "Sin Collector: no hay telemetría que mandar"; exit 0; }
+          sleep 10
+          docker stop -t 30 otel
+          docker logs otel 2>&1 | tail -40
+          echo "Telemetría en BigQuery con github.run_id=$GITHUB_RUN_ID"
+
       - name: Eliminar el worktree
         if: always()
         run: |
@@ -236,6 +295,9 @@ jobs:
             if [ -s "$RUNNER_TEMP/salida.json" ]; then
               jq -r '"", "Coste: \(.total_cost_usd) USD, \(.num_turns) turnos, final: \(.subtype)."' "$RUNNER_TEMP/salida.json"
               jq -r '"", "Herramientas denegadas: \(.permission_denials | length)", (.permission_denials[]? | "- \(.tool_name)")' "$RUNNER_TEMP/salida.json"
+            fi
+            if [ "$TELEMETRIA" = true ]; then
+              printf '\nTelemetría en BigQuery con github.run_id=%s.\n' "$GITHUB_RUN_ID"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           cat "$GITHUB_STEP_SUMMARY"
