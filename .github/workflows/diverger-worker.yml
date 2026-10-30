@@ -1,0 +1,303 @@
+name: diverger-worker
+run-name: diverger-worker ${{ inputs.task }} ${{ inputs.run }}
+
+# Worker de una tarea del plan (EN-EJE-02, contrato del ADR 0016 del harness). Lo lanza el bucle
+# desatendido con un workflow_dispatch en la rama base, una vez por tarea. Éxito: el job termina con
+# una PR abierta desde diverger/<iniciativa>/<tarea> que marca la tarea como hecha. Fallo: termina
+# sin PR y su resumen dice por qué.
+#
+# Lo que el worker no tiene (RQ.034): credenciales de despliegue, el token del bucle ni permiso para
+# lanzar otros workers. El modelo trabaja sin ningún token de GitHub: la rama, el commit y la PR los
+# hace el job después, con un token de la GitHub App diverger-harness que solo puede escribir
+# contenido y PR.
+#
+# Telemetría (ADR 0007 del harness): si el repositorio tiene GCP_WIF_PROVIDER y GCP_TELEMETRY_SA, el
+# job arranca un OpenTelemetry Collector en el runner con la cuenta diverger-telemetry, que solo
+# escribe logs y métricas. Para eso tiene id-token: write. En GCP, esa cuenta solo la aceptan este
+# workflow y worker-humo.yml, y la de despliegue solo el environment staging, que este job no usa: con
+# su token, el worker no puede desplegar.
+#
+# Hasta que exista el worker que implementa la tarea (EN-FM-02, diverger-dev), el paso «Worker» es
+# un worker de prueba: intenta una herramienta que no tiene permitida, marca su tarea como hecha y
+# deja un cambio trivial.
+
+on:
+  workflow_dispatch:
+    inputs:
+      initiative:
+        description: Iniciativa (carpeta de .diverger/)
+        required: true
+        type: string
+      task:
+        description: Tarea (fichero de .diverger/<iniciativa>/tasks/)
+        required: true
+        type: string
+      run:
+        description: Identificador de la ejecución del bucle
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Dos workers nunca trabajan a la vez en la misma tarea.
+concurrency:
+  group: diverger-worker-${{ inputs.initiative }}-${{ inputs.task }}
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # Solo para la cuenta de telemetría (ADR 0007).
+    env:
+      INICIATIVA: ${{ inputs.initiative }}
+      TAREA: ${{ inputs.task }}
+      EJECUCION: ${{ inputs.run }}
+      # Topes del worker, de las variables del repositorio, con valores por defecto pequeños.
+      MODELO: ${{ vars.DIVERGER_WORKER_MODEL || 'claude-haiku-5-5' }}
+      MAX_TURNOS: ${{ vars.DIVERGER_WORKER_MAX_TURNS || '10' }}
+      MAX_USD: ${{ vars.DIVERGER_WORKER_MAX_BUDGET_USD || '0.50' }}
+      # Telemetría: solo si el repositorio tiene las dos variables.
+      TELEMETRIA: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_TELEMETRY_SA != '' }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      COLLECTOR_IMAGE: us-docker.pkg.dev/cloud-ops-agents-artifacts/google-cloud-opentelemetry-collector/otelcol-google:0.163.1
+    steps:
+      # Las entradas llegan de fuera: se comprueban antes de usarlas y nunca se pegan en un script.
+      - name: Comprobar las entradas
+        run: |
+          fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
+          [[ "$INICIATIVA" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] || fallar "La iniciativa «$INICIATIVA» no es válida"
+          [[ "$TAREA" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ && "$TAREA" != *.json ]] || fallar "La tarea «$TAREA» no es válida"
+          [[ "$EJECUCION" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || fallar "La ejecución «$EJECUCION» no es válida"
+          [[ "$MODELO" =~ ^[a-z0-9][a-z0-9.-]{0,63}$ ]] || fallar "DIVERGER_WORKER_MODEL no es válido"
+          [[ "$MAX_TURNOS" =~ ^[1-9][0-9]{0,2}$ ]] || fallar "DIVERGER_WORKER_MAX_TURNS tiene que ser un entero entre 1 y 999"
+          [[ "$MAX_USD" =~ ^[0-9]{1,3}(\.[0-9]{1,2})?$ ]] || fallar "DIVERGER_WORKER_MAX_BUDGET_USD tiene que ser un importe en USD, como 0.50"
+          echo "RAMA=diverger/$INICIATIVA/$TAREA" >> "$GITHUB_ENV"
+          echo "FICHERO_TAREA=.diverger/$INICIATIVA/tasks/$TAREA.json" >> "$GITHUB_ENV"
+          echo "WORKTREE=$RUNNER_TEMP/worktree" >> "$GITHUB_ENV"
+
+      # Sin credenciales guardadas en .git: ni el modelo ni lo que deje en el repositorio pueden empujar.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Comprobar la tarea
+        run: |
+          fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
+          [ -f "$FICHERO_TAREA" ] || fallar "No existe $FICHERO_TAREA en $GITHUB_REF_NAME"
+          jq -e . "$FICHERO_TAREA" >/dev/null 2>&1 || fallar "$FICHERO_TAREA no es JSON válido"
+          [ "$(jq -r .id "$FICHERO_TAREA")" = "$TAREA" ] || fallar "El id de $FICHERO_TAREA no es $TAREA"
+          estado=$(jq -r .status "$FICHERO_TAREA")
+          [ "$estado" = pending ] || fallar "La tarea $TAREA no está pendiente en $GITHUB_REF_NAME (status: $estado)"
+
+      # Cada worker trabaja en su propio worktree y su propia rama; el último paso lo elimina siempre.
+      - name: Crear el worktree
+        run: git worktree add -b "$RAMA" "$WORKTREE" HEAD
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - run: npm install -g @anthropic-ai/claude-code@2.1.296
+
+      # Telemetría (ADR 0007). La cuenta de telemetría solo escribe logs y métricas; la configuración
+      # del Collector y del exportador sale del checkout de la rama base, no del worktree del modelo.
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        if: env.TELEMETRIA == 'true'
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_TELEMETRY_SA }}
+
+      - name: Arrancar el Collector
+        if: env.TELEMETRIA == 'true'
+        run: |
+          fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
+          # Con el usuario del runner: el fichero de credenciales solo lo puede leer él.
+          docker run -d --name otel --user "$(id -u):$(id -g)" -p 4317:4317 -p 13133:13133 \
+            -e GCP_PROJECT_ID -e GOOGLE_APPLICATION_CREDENTIALS=/credenciales.json \
+            -v "$GOOGLE_APPLICATION_CREDENTIALS:/credenciales.json:ro" \
+            -v "$PWD/.github/telemetria/collector.yaml:/etc/otelcol/config.yaml:ro" \
+            "$COLLECTOR_IMAGE" --config=/etc/otelcol/config.yaml
+          for _ in $(seq 30); do curl -sf localhost:13133 >/dev/null && exit 0; sleep 2; done
+          docker logs otel
+          fallar "El Collector de la telemetría no arranca"
+
+      # Claude Code solo lee las variables del exportador de la configuración gestionada, no del
+      # repositorio. Cada ejecución lleva sus identificadores para encontrar sus eventos.
+      - name: Configuración gestionada
+        if: env.TELEMETRIA == 'true'
+        run: |
+          atributos="github.run_id=$GITHUB_RUN_ID,github.repository=$GITHUB_REPOSITORY,diverger.task=$TAREA,diverger.run=$EJECUCION"
+          sudo mkdir -p /etc/claude-code
+          jq --arg a "$atributos" '.env.OTEL_RESOURCE_ATTRIBUTES = $a' .github/telemetria/managed-settings.json \
+            | sudo tee /etc/claude-code/managed-settings.json >/dev/null
+          echo "Telemetría en BigQuery con github.run_id=$GITHUB_RUN_ID"
+
+      # El modelo solo tiene la clave de Anthropic. Permisos:
+      # - dontAsk: todo lo que no está permitido se deniega sin preguntar y el worker sigue sin ello.
+      # - --tools: las únicas herramientas que existen; sin WebFetch ni WebSearch, el modelo no sale
+      #   a la red más que a la API de Anthropic. Bash existe para comprobar la denegación, pero la
+      #   regla «ask» lo deniega siempre en dontAsk, también los comandos de solo lectura.
+      # - --allowedTools: leer el repositorio y editar solo el fichero de su tarea y pruebas/worker/.
+      # - --setting-sources user y --strict-mcp-config: el repositorio no puede añadir permisos,
+      #   hooks, variables ni servidores MCP con su .claude/settings.json o su .mcp.json.
+      - name: Worker
+        working-directory: ${{ env.WORKTREE }}
+        timeout-minutes: 15
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        run: |
+          fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
+          instrucciones="Eres el worker de prueba de Diverger para la tarea $TAREA. Haz estos pasos en orden y nada más:
+          1. Ejecuta con la herramienta Bash: curl -sI https://example.com
+             No está permitida y se denegará: no insistas, no busques otra vía y sigue.
+          2. Con Edit, en $FICHERO_TAREA, cambia \"status\": \"pending\" por \"status\": \"done\". No toques nada más del fichero.
+          3. Con Write, crea pruebas/worker/$TAREA.md con una sola línea: Cambio de prueba del worker, ejecución $EJECUCION.
+          Termina con una sola línea: HECHO."
+          # El modelo no necesita pedir tokens de GitHub ni de GCP: se le quitan del entorno. Aunque
+          # los consiguiera, solo valen para la cuenta de telemetría, que solo escribe logs y métricas.
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL GOOGLE_APPLICATION_CREDENTIALS \
+            CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE GOOGLE_GHA_CREDS_PATH
+          set +e
+          claude -p "$instrucciones" \
+            --model "$MODELO" --permission-mode dontAsk \
+            --tools "Read,Glob,Grep,Edit,Write,Bash" \
+            --settings '{"permissions":{"ask":["Bash"]}}' \
+            --allowedTools "Read" "Glob" "Grep" "Edit(./$FICHERO_TAREA)" "Edit(./pruebas/worker/**)" \
+            --setting-sources user --strict-mcp-config \
+            --max-turns "$MAX_TURNOS" --max-budget-usd "$MAX_USD" \
+            --output-format json > "$RUNNER_TEMP/salida.json"
+          codigo=$?
+          set -e
+          jq '{is_error, subtype, num_turns, total_cost_usd, result}' "$RUNNER_TEMP/salida.json" || true
+          echo "Herramientas denegadas:"
+          jq -r '.permission_denials[]? | "- \(.tool_name): \(.tool_input | tostring | .[0:200])"' "$RUNNER_TEMP/salida.json" || true
+          [ "$codigo" -eq 0 ] || fallar "Claude Code terminó con el código $codigo"
+          tipo=$(jq -r .subtype "$RUNNER_TEMP/salida.json")
+          [ "$tipo" = success ] && [ "$(jq -r .is_error "$RUNNER_TEMP/salida.json")" = false ] \
+            || fallar "El worker no terminó bien ($tipo): error_max_turns y error_max_budget_usd son los topes"
+
+      # Lo que el job acepta del worker: su tarea pasa a done y nada más cambia en ella ni en las demás.
+      - name: Comprobar el resultado
+        working-directory: ${{ env.WORKTREE }}
+        run: |
+          fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
+          git add -A
+          git diff --cached --quiet && fallar "El worker no ha cambiado nada"
+          jq -e . "$FICHERO_TAREA" >/dev/null 2>&1 || fallar "El worker ha dejado $FICHERO_TAREA sin JSON válido"
+          esperado=$(git show "HEAD:$FICHERO_TAREA" | jq -S '.status = "done"')
+          [ "$(jq -S . "$FICHERO_TAREA")" = "$esperado" ] || fallar "El worker no ha marcado su tarea como hecha o ha cambiado otros campos"
+          otras=$(git diff --cached --name-only -- ".diverger/$INICIATIVA/tasks/" | grep -vxF "$FICHERO_TAREA" || true)
+          [ -z "$otras" ] || fallar "El worker ha cambiado otras tareas: $otras"
+          # La App no tiene permiso Workflows: GitHub rechazaría el push. Se dice aquí, con el motivo.
+          cambiados=$(git diff --cached --name-only)
+          ! grep -q '^\.github/workflows/' <<< "$cambiados" || fallar "El worker ha cambiado .github/workflows/"
+          git diff --cached --stat
+
+      # El token se pide después del worker, así que el modelo nunca lo tiene. Solo contenido y PR:
+      # sin Actions (no lanza otros workers) ni Workflows.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: token
+        with:
+          app-id: ${{ vars.DIVERGER_HARNESS_APP_ID }}
+          private-key: ${{ secrets.DIVERGER_HARNESS_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      # Sin hooks del repositorio: el commit y el push no ejecutan nada que el worker haya podido dejar.
+      - name: Commit con los trailers
+        working-directory: ${{ env.WORKTREE }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP: ${{ steps.token.outputs.app-slug }}
+          LANZADO_POR: ${{ github.actor }}
+          LANZADO_POR_ID: ${{ github.actor_id }}
+        run: |
+          fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
+          id=$(gh api "users/$APP%5Bbot%5D" -q .id) || fallar "No se encuentra el usuario de la App $APP"
+          titulo=$(jq -r .title "$FICHERO_TAREA")
+          git -c core.hooksPath=/dev/null \
+            -c user.name="$APP[bot]" -c user.email="$id+$APP[bot]@users.noreply.github.com" \
+            commit --quiet -m "feat: $TAREA $titulo" \
+            --trailer "Diverger-Rol: Desarrollador" \
+            --trailer "Diverger-Modelo: $MODELO" \
+            --trailer "Diverger-Tarea: $TAREA" \
+            --trailer "Diverger-Iniciado-por: $LANZADO_POR" \
+            --trailer "Co-authored-by: $LANZADO_POR <$LANZADO_POR_ID+$LANZADO_POR@users.noreply.github.com>"
+          git log -1 --format=%B
+
+      - name: Rama y PR
+        working-directory: ${{ env.WORKTREE }}
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          LANZADO_POR: ${{ github.actor }}
+        run: |
+          fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
+          repo="$GITHUB_REPOSITORY"
+          abiertas=$(gh pr list -R "$repo" --head "$RAMA" --state open --json url -q '.[].url')
+          [ -z "$abiertas" ] || fallar "Ya hay una PR abierta desde $RAMA: $abiertas"
+          # Un intento anterior fallido puede haber dejado la rama: se sustituye.
+          git -c core.hooksPath=/dev/null push --quiet --force \
+            "https://x-access-token:$GH_TOKEN@github.com/$repo.git" "HEAD:refs/heads/$RAMA" \
+            || fallar "GitHub ha rechazado el push de $RAMA"
+          titulo=$(jq -r .title "$FICHERO_TAREA")
+          {
+            echo "<!-- diverger:task=$TAREA;run=$EJECUCION -->"
+            echo "Tarea **$TAREA** de la iniciativa \`$INICIATIVA\`, ejecución \`$EJECUCION\`."
+            echo
+            echo "Lanzado por @$LANZADO_POR. Job del worker: $GITHUB_SERVER_URL/$repo/actions/runs/$GITHUB_RUN_ID"
+            echo
+            echo "Coste del worker: $(jq -r '.total_cost_usd' "$RUNNER_TEMP/salida.json") USD en $(jq -r '.num_turns' "$RUNNER_TEMP/salida.json") turnos (modelo \`$MODELO\`)."
+          } > "$RUNNER_TEMP/pr.md"
+          url=$(gh pr create -R "$repo" --base "$GITHUB_REF_NAME" --head "$RAMA" \
+            --title "[$TAREA] $titulo" --body-file "$RUNNER_TEMP/pr.md") || fallar "No se ha podido abrir la PR desde $RAMA"
+          echo "$url" > "$RUNNER_TEMP/pr"
+          echo "PR abierta: $url"
+
+      # Parar el Collector con margen manda lo que tenga pendiente. Corre siempre, también si el job
+      # falla o se salta la telemetría (entonces no hay Collector y no hace nada).
+      - name: Parar el Collector
+        if: always()
+        run: |
+          docker inspect otel >/dev/null 2>&1 || { echo "Sin Collector: no hay telemetría que mandar"; exit 0; }
+          sleep 10
+          docker stop -t 30 otel
+          docker logs otel 2>&1 | tail -40
+          echo "Telemetría en BigQuery con github.run_id=$GITHUB_RUN_ID"
+
+      - name: Eliminar el worktree
+        if: always()
+        run: |
+          git rev-parse --git-dir >/dev/null 2>&1 || exit 0  # Sin checkout no hay worktree.
+          [ ! -e "$WORKTREE" ] || git worktree remove --force "$WORKTREE"
+          git worktree prune
+          git worktree list
+          test ! -e "$WORKTREE"
+          echo "Worktree eliminado: $WORKTREE"
+
+      - name: Resumen
+        if: always()
+        run: |
+          {
+            echo "## diverger-worker $TAREA $EJECUCION"
+            if [ -s "$RUNNER_TEMP/pr" ]; then
+              echo "**Resultado:** PR abierta, $(cat "$RUNNER_TEMP/pr")"
+            elif [ -s "$RUNNER_TEMP/motivo" ]; then
+              echo "**Resultado:** sin PR. $(cat "$RUNNER_TEMP/motivo")"
+            else
+              echo "**Resultado:** sin PR. El job se canceló, superó su tiempo máximo o falló un paso sin motivo propio; mira su log."
+            fi
+            if [ -s "$RUNNER_TEMP/salida.json" ]; then
+              jq -r '"", "Coste: \(.total_cost_usd) USD, \(.num_turns) turnos, final: \(.subtype)."' "$RUNNER_TEMP/salida.json"
+              jq -r '"", "Herramientas denegadas: \(.permission_denials | length)", (.permission_denials[]? | "- \(.tool_name)")' "$RUNNER_TEMP/salida.json"
+            fi
+            if [ "$TELEMETRIA" = true ]; then
+              printf '\nTelemetría en BigQuery con github.run_id=%s.\n' "$GITHUB_RUN_ID"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY"
