@@ -10,8 +10,12 @@ on:
       prueba:
         description: Qué se comprueba
         type: choice
-        options: [todo, worker, gcp, telemetria, telemetria-repo]
+        options: [todo, worker, gcp, telemetria, telemetria-repo, identidad]
         default: todo
+      dejar-abierta:
+        description: Con «identidad», deja abierta la PR de prueba para aprobarla a mano
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -122,3 +126,50 @@ jobs:
           docker stop -t 30 otel
           docker logs otel 2>&1 | tail -40
           echo "Buscar en BigQuery por github.run_id=$GITHUB_RUN_ID"
+
+  # Identidad del harness en GitHub (EN-OPS-05, ADR 0008). Con un token de vida corta de la GitHub App
+  # diverger-harness, abre una PR que tiene que salir como diverger-harness[bot] e intenta aprobarla
+  # con ese mismo token: GitHub tiene que rechazarlo. Sin «dejar-abierta», cierra la PR al terminar.
+  identidad:
+    if: inputs.prueba == 'identidad'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: token
+        with:
+          app-id: ${{ vars.DIVERGER_HARNESS_APP_ID }}
+          private-key: ${{ secrets.DIVERGER_HARNESS_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+      - name: PR abierta por la identidad del harness
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          LANZADO_POR: ${{ github.actor }}
+          DEJAR_ABIERTA: ${{ inputs.dejar-abierta }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          rama="prueba/identidad-$GITHUB_RUN_ID"
+          base=$(gh api "repos/$repo/git/ref/heads/main" -q .object.sha)
+          gh api "repos/$repo/git/refs" -f ref="refs/heads/$rama" -f sha="$base" >/dev/null
+          contenido=$(printf 'Prueba de la identidad del harness, ejecución %s.\n' "$GITHUB_RUN_ID" | base64 -w0)
+          gh api -X PUT "repos/$repo/contents/pruebas/identidad-$GITHUB_RUN_ID.md" -f branch="$rama" \
+            -f message="test: identidad del harness (EN-OPS-05)" -f content="$contenido" >/dev/null
+          pr=$(gh api "repos/$repo/pulls" -f head="$rama" -f base=main \
+            -f title="Prueba de la identidad del harness ($GITHUB_RUN_ID)" \
+            -f body="Lanzado por @$LANZADO_POR. Ejecución: $GITHUB_SERVER_URL/$repo/actions/runs/$GITHUB_RUN_ID" -q .number)
+          autor=$(gh api "repos/$repo/pulls/$pr" -q .user.login)
+          echo "PR #$pr abierta por $autor"
+          test "$autor" = "diverger-harness[bot]"
+          if gh api "repos/$repo/pulls/$pr/reviews" -f event=APPROVE >salida.json 2>error.txt; then
+            echo "La identidad del harness ha podido aprobar su propia PR"; exit 1
+          fi
+          echo "Aprobación rechazada, como se espera: $(jq -r '.message + " " + ((.errors // []) | join(" "))' salida.json 2>/dev/null || cat error.txt)"
+          if [ "$DEJAR_ABIERTA" != "true" ]; then
+            gh api -X PATCH "repos/$repo/pulls/$pr" -f state=closed >/dev/null
+            gh api -X DELETE "repos/$repo/git/refs/heads/$rama"
+            echo "PR #$pr cerrada y rama borrada"
+          fi
