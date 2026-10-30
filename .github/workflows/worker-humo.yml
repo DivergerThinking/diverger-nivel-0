@@ -240,9 +240,25 @@ jobs:
           done
           echo "Revisión pedida a: ${revisores:-nadie}"
           grep -qx "$titular" <<<"$revisores"
-          decision=$(gh pr view "$pr" -R "$repo" --json reviewDecision -q .reviewDecision)
-          echo "Decisión de revisión: $decision"
-          test "$decision" = REVIEW_REQUIRED
+          # Con rulesets, reviewDecision sale vacío: solo lo calcula la protección de rama clásica. Se
+          # espera a la comprobación obligatoria (gitleaks); en verde, lo único que bloquea es la revisión.
+          cabeza=$(gh api "repos/$repo/pulls/$pr" -q .head.sha)
+          gitleaks=""
+          for i in $(seq 40); do
+            gitleaks=$(gh api "repos/$repo/commits/$cabeza/check-runs?check_name=gitleaks" -q '.check_runs[0].conclusion // empty')
+            [ -n "$gitleaks" ] && break
+            sleep 5
+          done
+          echo "gitleaks: ${gitleaks:-sin terminar}"
+          test "$gitleaks" = success
+          estado=""
+          for i in $(seq 10); do
+            estado=$(gh pr view "$pr" -R "$repo" --json mergeStateStatus -q .mergeStateStatus)
+            [ "$estado" != UNKNOWN ] && break
+            sleep 3
+          done
+          echo "Estado de integración: $estado"
+          test "$estado" = BLOCKED
           if gh api -X PUT "repos/$repo/pulls/$pr/merge" >salida.json 2>error.txt; then
             echo "La PR se ha integrado sin la aprobación del titular"; exit 1
           fi
