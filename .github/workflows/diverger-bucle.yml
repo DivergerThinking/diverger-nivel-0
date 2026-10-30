@@ -1,0 +1,107 @@
+name: diverger-bucle
+run-name: diverger-bucle ${{ inputs.initiative }}
+
+# Bucle desatendido (HU-EJE-01, ADR 0016 del harness). Recorre el plan de una iniciativa sin modelo:
+# en cada vuelta actualiza la rama base, mira el job y la PR de cada worker y lanza el job
+# diverger-worker.yml de las siguientes tareas listas. Se para cuando todas están hechas, una tarea
+# falla tres veces, se agota el presupuesto de pasos o una tarea espera su test de aceptación.
+# Relanzado, reanuda sin repetir lo hecho.
+#
+# El código del bucle es del núcleo, en el repositorio privado del harness: el job lo descarga con un
+# token de la GitHub App diverger-harness de solo lectura (ADR 0016, «De dónde saca el job el código
+# del núcleo»). Para lanzar workers usa otro token de la App, con Actions: escritura y lectura de
+# contenido y PR en este repositorio. No ejecuta ningún modelo ni tiene credenciales de GCP.
+
+on:
+  workflow_dispatch:
+    inputs:
+      initiative:
+        description: Iniciativa (carpeta de .diverger/)
+        required: true
+        type: string
+      max-workers:
+        description: Workers a la vez (1 en el nivel 0)
+        required: false
+        type: string
+        default: "1"
+      restart:
+        description: Levanta una parada «blocked» o de presupuesto y pone a cero los intentos fallidos
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Un solo bucle por iniciativa: un segundo lanzamiento espera a que acabe el primero.
+concurrency:
+  group: diverger-bucle-${{ inputs.initiative }}
+  cancel-in-progress: false
+
+jobs:
+  bucle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      INICIATIVA: ${{ inputs.initiative }}
+      MAX_WORKERS: ${{ inputs.max-workers }}
+      REINICIAR: ${{ inputs.restart }}
+      NUCLEO_REF: ${{ vars.DIVERGER_HARNESS_REF || 'main' }}
+    steps:
+      - name: Validar las entradas
+        run: |
+          fallar() { echo "::error::$1"; exit 1; }
+          [[ "$INICIATIVA" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] || fallar "La iniciativa «$INICIATIVA» no es válida"
+          [[ "$MAX_WORKERS" =~ ^[1-9]$ ]] || fallar "max-workers tiene que ser un entero entre 1 y 9"
+          [[ "$NUCLEO_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || fallar "DIVERGER_HARNESS_REF no es válida"
+      # La rama base, con las credenciales del job (solo lectura) para que el bucle haga git pull.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Token de lectura del núcleo
+        id: token-nucleo
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.DIVERGER_HARNESS_APP_ID }}
+          private-key: ${{ secrets.DIVERGER_HARNESS_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: Diverger-ExP-Harness
+          permission-contents: read
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/Diverger-ExP-Harness
+          ref: ${{ env.NUCLEO_REF }}
+          token: ${{ steps.token-nucleo.outputs.token }}
+          path: .diverger-nucleo
+          persist-credentials: false
+          sparse-checkout: plugins/diverger/server
+      # El núcleo no es parte del proyecto: que git no lo vea como un cambio.
+      - name: Ocultar el núcleo a git
+        run: echo "/.diverger-nucleo/" >> .git/info/exclude
+      - name: Token para lanzar los workers
+        id: token-bucle
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.DIVERGER_HARNESS_APP_ID }}
+          private-key: ${{ secrets.DIVERGER_HARNESS_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: write
+          permission-contents: read
+          permission-pull-requests: read
+      - name: Bucle
+        env:
+          GH_TOKEN: ${{ steps.token-bucle.outputs.token }}
+        run: |
+          opciones=(--initiative "$INICIATIVA" --repo "$GITHUB_REPOSITORY" --base "$GITHUB_REF_NAME"
+                    --max-workers "$MAX_WORKERS" --project "$GITHUB_WORKSPACE")
+          [ "$REINICIAR" = "true" ] && opciones+=(--restart)
+          set +e
+          python3 .diverger-nucleo/plugins/diverger/server/bucle.py "${opciones[@]}" | tee salida.txt
+          codigo=${PIPESTATUS[0]}
+          {
+            echo "## Bucle de $INICIATIVA"
+            echo
+            echo '```'
+            tail -n 20 salida.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$codigo"
