@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "TA-003",
   "title": "Prueba: ver los equipos disponibles (HU-003)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-003",
   "context": "prueba",
   "modules": [
