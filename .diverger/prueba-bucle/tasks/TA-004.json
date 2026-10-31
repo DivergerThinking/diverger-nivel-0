@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "TA-004",
+  "title": "Prueba: avisar de un préstamo vencido (HU-001)",
+  "status": "pending",
+  "story": "HU-001",
+  "context": "prueba",
+  "modules": [
+    "src/prueba"
+  ],
+  "dependsOn": []
+}

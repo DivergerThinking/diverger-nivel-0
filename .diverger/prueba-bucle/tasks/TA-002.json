@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "TA-002",
   "title": "Prueba: devolver un equipo (HU-002)",
-  "status": "done",
+  "status": "pending",
   "story": "HU-002",
   "context": "prueba",
   "modules": [

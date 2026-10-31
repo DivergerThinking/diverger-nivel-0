@@ -10,7 +10,12 @@ run-name: diverger-bucle ${{ inputs.initiative }}
 # El código del bucle es del núcleo, en el repositorio privado del harness: el job lo descarga con un
 # token de la GitHub App diverger-harness de solo lectura (ADR 0016, «De dónde saca el job el código
 # del núcleo»). Para lanzar workers usa otro token de la App, con Actions: escritura y lectura de
-# contenido y PR en este repositorio. No ejecuta ningún modelo ni tiene credenciales de GCP.
+# contenido y PR en este repositorio. No ejecuta ningún modelo.
+#
+# Al parar, el bucle deja el resultado de cada tarea y de la fase, y el job lo registra en el log
+# diverger-ejecucion de Cloud Logging con la cuenta diverger-telemetry, que solo escribe logs y
+# métricas (EN-TEL-02, ADR 0017 del harness). Unas vistas de BigQuery lo unen al coste y al tiempo
+# de la telemetría de los workers. Sin GCP_WIF_PROVIDER y GCP_TELEMETRY_SA no se registra nada.
 
 on:
   workflow_dispatch:
@@ -42,11 +47,16 @@ jobs:
   bucle:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    permissions:
+      contents: read
+      id-token: write # Solo para la cuenta de telemetría, al terminar (ADR 0017).
     env:
       INICIATIVA: ${{ inputs.initiative }}
       MAX_WORKERS: ${{ inputs.max-workers }}
       REINICIAR: ${{ inputs.restart }}
       NUCLEO_REF: ${{ vars.DIVERGER_HARNESS_REF || 'main' }}
+      TELEMETRIA: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_TELEMETRY_SA != '' }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
     steps:
       - name: Validar las entradas
         run: |
@@ -92,7 +102,7 @@ jobs:
           GH_TOKEN: ${{ steps.token-bucle.outputs.token }}
         run: |
           opciones=(--initiative "$INICIATIVA" --repo "$GITHUB_REPOSITORY" --base "$GITHUB_REF_NAME"
-                    --max-workers "$MAX_WORKERS" --project "$GITHUB_WORKSPACE")
+                    --max-workers "$MAX_WORKERS" --project "$GITHUB_WORKSPACE" --results "$RUNNER_TEMP/resultados.jsonl")
           [ "$REINICIAR" = "true" ] && opciones+=(--restart)
           set +e
           python3 .diverger-nucleo/plugins/diverger/server/bucle.py "${opciones[@]}" | tee salida.txt
@@ -105,3 +115,21 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$codigo"
+      # Después del bucle, que puede durar horas: el token de GCP dura una. Si el registro falla, el
+      # job no falla por eso: solo se pierde la fila (ADR 0017).
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        if: always() && env.TELEMETRIA == 'true'
+        continue-on-error: true
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_TELEMETRY_SA }}
+      - name: Registrar el resultado
+        if: always() && env.TELEMETRIA == 'true'
+        continue-on-error: true
+        run: |
+          resultados="$RUNNER_TEMP/resultados.jsonl"
+          [ -s "$resultados" ] || { echo "El bucle no ha parado: no hay resultado que registrar"; exit 0; }
+          while IFS= read -r linea; do
+            gcloud logging write diverger-ejecucion "$linea" --payload-type=json --project "$GCP_PROJECT_ID" --quiet
+          done < "$resultados"
+          echo "Registradas $(wc -l < "$resultados") filas en el log diverger-ejecucion"
