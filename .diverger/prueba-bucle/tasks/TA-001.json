@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "TA-001",
   "title": "Prueba: prestar un equipo (HU-001)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-001",
   "context": "prueba",
   "modules": [
