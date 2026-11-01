@@ -1,3 +1,4 @@
 {
-  "mode": "checkpoints"
+  "mode": "yolo",
+  "default_provider": "local"
 }
