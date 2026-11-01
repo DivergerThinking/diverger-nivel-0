@@ -1,0 +1,54 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Contexto de ejemplo",
+    "version": "0.1.0",
+    "description": "Contexto de ejemplo de la plantilla. El arquitecto lo sustituye por los contextos de la aplicación."
+  },
+  "servers": [{ "url": "/" }],
+  "security": [{ "google": [] }],
+  "paths": {
+    "/api/ejemplo/saludo": {
+      "get": {
+        "operationId": "obtenerSaludo",
+        "summary": "Saludo para la persona que ha iniciado sesión",
+        "responses": {
+          "200": {
+            "description": "Saludo",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Saludo" } }
+            }
+          },
+          "401": {
+            "description": "Falta el inicio de sesión o el token no es válido",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "google": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Token de identidad de Google (Google Identity Services)"
+      }
+    },
+    "schemas": {
+      "Saludo": {
+        "type": "object",
+        "required": ["mensaje"],
+        "properties": { "mensaje": { "type": "string" } }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": { "error": { "type": "string" } }
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "prestamos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "equipo", "order": "ASCENDING" },
+        { "fieldPath": "inicio", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "equipos",
+      "fields": [
+        { "fieldPath": "etiquetas", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "nombre", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
