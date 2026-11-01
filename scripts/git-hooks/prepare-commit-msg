@@ -1,0 +1,15 @@
+#!/bin/sh
+# Añade a cada commit de un agente los trailers de rol, modelo y tarea (EN-OPS-02).
+# El job del worker activa el hook (git config core.hooksPath scripts/git-hooks) y define
+# DIVERGER_ROL, DIVERGER_MODELO y DIVERGER_TAREA. Sin DIVERGER_TAREA el commit es de una persona.
+set -eu
+[ -n "${DIVERGER_TAREA:-}" ] || exit 0
+if [ -z "${DIVERGER_ROL:-}" ] || [ -z "${DIVERGER_MODELO:-}" ]; then
+  echo "Faltan DIVERGER_ROL o DIVERGER_MODELO para los trailers del commit de $DIVERGER_TAREA" >&2
+  exit 1
+fi
+git interpret-trailers --in-place --if-exists replace \
+  --trailer "Diverger-Rol: $DIVERGER_ROL" \
+  --trailer "Diverger-Modelo: $DIVERGER_MODELO" \
+  --trailer "Diverger-Tarea: $DIVERGER_TAREA" \
+  "$1"
