@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "TA-004",
   "title": "Préstamos: prestar un equipo (HU-PRE-01)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-PRE-01",
   "context": "prestamos",
   "modules": [
