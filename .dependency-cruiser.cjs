@@ -33,6 +33,14 @@ module.exports = {
       to: { path: "^(app|web|src)/" },
     },
     {
+      name: "datos-solo-por-el-puerto",
+      severity: "error",
+      comment:
+        "Los contextos, el servidor y el frontend no usan el cliente de la base: los datos van por el puerto de lib/datos.ts, y solo su adaptador (lib/firestore.ts) conoce la base (HU-GP-01).",
+      from: { path: "^(src|app|web)/" },
+      to: { path: "node_modules/@google-cloud/firestore" },
+    },
+    {
       name: "sin-ciclos",
       severity: "error",
       from: {},

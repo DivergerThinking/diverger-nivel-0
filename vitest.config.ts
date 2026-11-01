@@ -7,7 +7,7 @@ export default defineConfig({
     projects: [
       {
         extends: true,
-        test: { name: "servidor", environment: "node", include: ["app/**/*.test.ts", "src/**/*.test.ts", "test/**/*.test.ts"], testTimeout: 60000 },
+        test: { name: "servidor", environment: "node", include: ["app/**/*.test.ts", "lib/**/*.test.ts", "src/**/*.test.ts", "test/**/*.test.ts"], testTimeout: 60000 },
       },
       {
         extends: true,

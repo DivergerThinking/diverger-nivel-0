@@ -1,14 +1,19 @@
 // Servidor de la aplicación: API en /api (con inicio de sesión) y el frontend construido en dist/web.
 import { existsSync } from "node:fs";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyPluginAsync } from "fastify";
 import fastifyStatic from "@fastify/static";
 import { tokenDeCabecera, type VerificarToken } from "../lib/auth.js";
-import { contextos } from "./contextos.js";
+import { almacenEnMemoria, type Almacen, type OpcionesContexto } from "../lib/datos.js";
+import { contextos as contextosDeLaAplicacion } from "./contextos.js";
 
 export interface Opciones {
   /** ID de cliente OAuth de Google; lo usa el frontend para pedir el token. Vacío, nadie inicia sesión. */
   googleClientId: string;
   verificarToken: VerificarToken;
+  /** Almacén de datos que reciben los contextos (lib/datos.ts); sin él, uno en memoria. */
+  almacen?: Almacen;
+  /** Contextos que se registran; por defecto, los de app/contextos.ts. Los tests pueden pasar otros. */
+  contextos?: FastifyPluginAsync<OpcionesContexto>[];
   /** Carpeta del frontend construido; sin ella solo se sirve la API. */
   webRoot?: string;
   logger?: boolean;
@@ -39,7 +44,8 @@ export async function crearServidor(opciones: Opciones): Promise<FastifyInstance
   app.get("/api/config", () => ({ googleClientId: opciones.googleClientId }));
   app.get("/api/yo", (request) => request.persona);
 
-  for (const rutas of contextos) await app.register(rutas);
+  const almacen = opciones.almacen ?? almacenEnMemoria();
+  for (const rutas of opciones.contextos ?? contextosDeLaAplicacion) await app.register(rutas, { almacen });
 
   if (opciones.webRoot && existsSync(opciones.webRoot)) {
     await app.register(fastifyStatic, { root: opciones.webRoot, wildcard: false });
