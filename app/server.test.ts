@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyPluginAsync } from "fastify";
+import { almacenEnMemoria, type OpcionesContexto } from "../lib/datos.js";
 import { crearServidor } from "./server.js";
 
 const ANA = { email: "ana@example.com", nombre: "Ana" };
@@ -48,6 +49,18 @@ describe("servidor", () => {
     const headers = { authorization: "Bearer token-bueno" };
     expect((await app.inject({ url: "/api/yo", headers })).json()).toEqual(ANA);
     expect((await app.inject({ url: "/api/ejemplo/saludo", headers })).json()).toEqual({ mensaje: "Hola, Ana" });
+  });
+
+  it("cada contexto recibe el almacén de datos en sus opciones (HU-GP-01)", async () => {
+    const almacen = almacenEnMemoria();
+    await almacen.guardar("prueba_equipos", "pc-07", { nombre: "Portátil 07" });
+    const contexto: FastifyPluginAsync<OpcionesContexto> = (instancia, opciones) => {
+      instancia.get("/api/prueba/equipos", () => opciones.almacen.listar("prueba_equipos"));
+      return Promise.resolve();
+    };
+    app = await crearServidor({ googleClientId: "cliente", verificarToken, almacen, contextos: [contexto] });
+    const respuesta = await app.inject({ url: "/api/prueba/equipos", headers: { authorization: "Bearer token-bueno" } });
+    expect(respuesta.json()).toEqual([{ nombre: "Portátil 07" }]);
   });
 
   it("sirve el frontend y devuelve index.html en las rutas de la aplicación", async () => {

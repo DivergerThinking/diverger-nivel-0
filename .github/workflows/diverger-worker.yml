@@ -309,6 +309,17 @@ jobs:
             --title "[$TAREA] $titulo" --body-file "$RUNNER_TEMP/pr.md") || fallar "No se ha podido abrir la PR desde $RAMA"
           echo "$url" > "$RUNNER_TEMP/pr"
           echo "PR abierta: $url"
+          # Auto-merge siempre: GitHub la integra cuando se cumplen las reglas de main. La política de
+          # aprobación del ruleset decide si espera a una persona (ADR 0008 y 0016 del harness), así que
+          # vale en yolo y en checkpoints. Si el repositorio no lo permite, la PR queda abierta y el bucle
+          # espera a que alguien la integre.
+          if gh pr merge "$url" -R "$repo" --auto --merge --delete-branch; then
+            echo "auto" > "$RUNNER_TEMP/integracion"
+            echo "Auto-merge activado: se integra cuando pasen las comprobaciones y, si el ruleset lo pide, la aprobación"
+          else
+            echo "manual" > "$RUNNER_TEMP/integracion"
+            echo "::warning::No se ha podido activar el auto-merge (¿«Allow auto-merge» desactivado?): alguien tiene que integrar $url"
+          fi
 
       # Parar el Collector con margen manda lo que tenga pendiente. Corre siempre, también si el job
       # falla o se salta la telemetría (entonces no hay Collector y no hace nada).
@@ -338,6 +349,11 @@ jobs:
             echo "## diverger-worker $TAREA $EJECUCION"
             if [ -s "$RUNNER_TEMP/pr" ]; then
               echo "**Resultado:** PR abierta, $(cat "$RUNNER_TEMP/pr")"
+              if [ "$(cat "$RUNNER_TEMP/integracion" 2>/dev/null)" = auto ]; then
+                echo "Se integrará sola cuando se cumplan las reglas de la rama base (auto-merge)."
+              else
+                echo "Sin auto-merge: alguien tiene que integrarla."
+              fi
             elif [ -s "$RUNNER_TEMP/motivo" ]; then
               echo "**Resultado:** sin PR. $(cat "$RUNNER_TEMP/motivo")"
             else

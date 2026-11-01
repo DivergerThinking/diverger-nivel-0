@@ -62,6 +62,16 @@ describe("dependencias entre contextos", () => {
     ).toEqual(["solo-index-de-otro-contexto: src/prestamos/index.ts -> src/equipos/interno.ts"]);
   });
 
+  it("falla si un contexto usa el cliente de la base en vez del puerto de lib/datos.ts (HU-GP-01)", async () => {
+    expect(
+      await violaciones({
+        "node_modules/@google-cloud/firestore/package.json": '{"name": "@google-cloud/firestore", "main": "index.js"}\n',
+        "node_modules/@google-cloud/firestore/index.js": "exports.Firestore = class {};\n",
+        "src/prestamos/index.ts": 'import { Firestore } from "@google-cloud/firestore";\nexport const mal = Firestore;\n',
+      }),
+    ).toEqual(["datos-solo-por-el-puerto: src/prestamos/index.ts -> node_modules/@google-cloud/firestore/index.js"]);
+  });
+
   it("falla si el servidor entra en lo interno de un contexto", async () => {
     expect(
       await violaciones({

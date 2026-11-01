@@ -191,6 +191,13 @@ describe("forma del workflow del worker", () => {
     expect(pr).toContain('--base "$GITHUB_REF_NAME"');
   });
 
+  it("activa el auto-merge de su PR y, si no puede, avisa sin fallar (HU-GP-01)", () => {
+    const pr = paso("Rama y PR").run ?? "";
+    expect(pr).toContain('gh pr merge "$url" -R "$repo" --auto --merge --delete-branch');
+    expect(pr).not.toMatch(/--admin/);
+    expect(pr).toMatch(/if gh pr merge[^\n]*; then[\s\S]*::warning::No se ha podido activar el auto-merge/);
+  });
+
   it("el commit lleva los trailers de autoría y no ejecuta hooks del repositorio", () => {
     const commit = paso("Commit con los trailers").run ?? "";
     for (const trailer of ["Diverger-Rol: Desarrollador", "Diverger-Modelo: $MODELO", "Diverger-Tarea: $TAREA", "Diverger-Iniciado-por: $LANZADO_POR"]) {
