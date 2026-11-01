@@ -2,6 +2,8 @@ Queremos una lista de los equipos de la oficina donde IT pueda apuntar a quién 
 
 Solo la usa el equipo de IT, que entra con su cuenta de Google de la empresa. IT da de alta los equipos (por ejemplo, «Portátil 07» o «Proyector sala 2»), apunta cada préstamo con la persona y la fecha en que lo tiene que devolver, apunta la devolución cuando le devuelven el equipo y ve en todo momento qué equipos están prestados, a quién y hasta cuándo. No hace falta que los empleados pidan nada desde la aplicación, ni avisos de préstamos vencidos.
 
+Hoy lo apuntamos en una hoja de cálculo que nadie mantiene al día: no sabemos qué equipos están prestados ni a quién, y cada pocos meses se pierde alguno o alguien se queda sin portátil porque creíamos que estaba libre. Daremos el proyecto por bueno si durante el primer mes todos los préstamos se apuntan en la aplicación y no se pierde ningún equipo. Lo que más nos preocupa es que IT deje de usarla si apuntar un préstamo cuesta más de un minuto, y que el inventario deje de funcionar si la API cambia.
+
 ## Anexo: API para el inventario de IT
 
 El inventario de IT se va a conectar a la aplicación, así que la API tiene que ser exactamente esta. Todas las rutas necesitan haber iniciado sesión: sin un token válido responden 401. Los errores son un objeto JSON `{"error": "<mensaje>"}` con el mensaje exacto que se indica.
