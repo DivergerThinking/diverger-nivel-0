@@ -1,0 +1,135 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Contexto de préstamos",
+    "version": "1.0.0",
+    "description": "Préstamos de los equipos de la oficina."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "google": []
+    }
+  ],
+  "paths": {
+    "/api/prestamos": {
+      "post": {
+        "operationId": "crearPrestamo",
+        "summary": "Prestar un equipo a una persona",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NuevoPrestamo"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Préstamo activo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Prestamo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Faltan el equipo o la persona",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Falta el inicio de sesión o el token no es válido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "El equipo ya está prestado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "google": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Token de identidad de Google (Google Identity Services)"
+      }
+    },
+    "schemas": {
+      "NuevoPrestamo": {
+        "type": "object",
+        "required": [
+          "equipo",
+          "persona"
+        ],
+        "properties": {
+          "equipo": {
+            "type": "string"
+          },
+          "persona": {
+            "type": "string"
+          }
+        }
+      },
+      "Prestamo": {
+        "type": "object",
+        "required": [
+          "equipo",
+          "persona",
+          "activo"
+        ],
+        "properties": {
+          "equipo": {
+            "type": "string"
+          },
+          "persona": {
+            "type": "string"
+          },
+          "activo": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

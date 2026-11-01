@@ -9,3 +9,27 @@ credentials*.json
 secrets*.json
 *token*.txt
 
+
+node_modules/
+dist/
+coverage/
+# Tipos generados desde los contratos OpenAPI: se regeneran con npm run gen.
+src/*/api.gen.ts
+.env
+.env.*
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Worktrees de los subagentes y workflows de Claude Code (ADR 0009 del harness)
+.claude/worktrees/
+
+# Infraestructura como código: proveedores descargados, estado local y planes guardados. El estado
+# va en el bucket de infra/staging.gcs.tfbackend, nunca en el repositorio.
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*.tfplan
+infra/.terraform.tfstate.lock.info

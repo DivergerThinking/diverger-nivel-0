@@ -1,0 +1,7 @@
+# Linter de los contratos OpenAPI de spec/contextos/<id>/api.openapi.json.
+extends:
+  - recommended
+rules:
+  operation-4xx-response: error
+  no-server-example.com: off
+  info-license: off

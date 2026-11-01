@@ -1,0 +1,4 @@
+# Dónde guarda OpenTofu el estado de staging: un bucket del proyecto, con versiones, y un prefijo
+# por aplicación y entorno. Se usa con tofu init -backend-config=staging.gcs.tfbackend.
+bucket = "diverger-exp-harness-tofu-estado"
+prefix = "golden-path/staging"

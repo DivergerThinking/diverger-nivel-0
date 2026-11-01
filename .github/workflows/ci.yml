@@ -1,0 +1,308 @@
+name: ci
+
+# CI de cada PR: trailers de autoría, lint, contratos, dependencias entre contextos, tipos, tests, dependencias con
+# vulnerabilidades conocidas (SCA), la infraestructura como código y la imagen del contenedor con
+# su análisis. El análisis del código (SAST) está en codeql.yml y el de secretos en secretos.yml.
+# Al integrar en main, el job «despliegue» lleva a staging la imagen ya analizada (EN-FM-04).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Para volver a desplegar main a mano; desde otra rama, el environment staging no lo deja.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TRIVY_VERSION: 0.76.1
+  TRIVY_SHA256: c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0
+  TOFU_VERSION: 1.12.8
+  TOFU_SHA256: e280accc5e074c69d6b731cca939d4d030fdffc616b146e35227cd0c9208ba82
+  # La suma es la de terraform_<versión>_SHA256SUMS de releases.hashicorp.com, firmado por HashiCorp.
+  TERRAFORM_VERSION: 1.16.6
+  TERRAFORM_SHA256: 38034b38d03096399a7a1264a14561a8029b2b496fd1f169452656e53968f1b7
+
+jobs:
+  calidad:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # EN-OPS-04: CODEOWNERS sigue cubriendo .diverger/settings.json y a sí mismo.
+      - name: CODEOWNERS de la configuración
+        run: node scripts/codeowners.mjs
+      - name: Generar tipos desde los contratos
+        run: npm run gen
+      - name: Lint
+        run: npm run lint
+      - name: Linter de OpenAPI
+        run: npm run lint:openapi
+      - name: Linter de dependencias entre contextos
+        run: npm run lint:deps
+      - name: Tipos
+        run: npm run typecheck
+      - name: Tests
+        run: npm test
+      - name: Dependencias con vulnerabilidades conocidas (SCA)
+        run: npm audit --audit-level=high
+
+  # Cada commit de un agente lleva los trailers de rol, modelo y tarea (scripts/git-hooks).
+  trailers:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Trailers de autoría
+        env:
+          RANGO: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+        run: node scripts/trailers.mjs "$RANGO"
+
+  # Solo en la plantilla: un repositorio creado desde ella recibe los ficheros de este commit y
+  # nada más, así que se exportan a una carpeta limpia y se comprueban ahí desde cero.
+  repo-nuevo:
+    if: github.repository == 'DivergerThinking/diverger-golden-path'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: Exportar el commit a una carpeta limpia
+        run: |
+          mkdir "$RUNNER_TEMP/repo-nuevo"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/repo-nuevo"
+      - name: Comprobar el repositorio nuevo
+        working-directory: ${{ runner.temp }}/repo-nuevo
+        run: |
+          npm ci
+          npm run check
+          npm run build
+
+  # Infraestructura como código (EN-GP-03, ADR 0013 del harness): formato, validación contra el
+  # esquema del proveedor y pruebas del plan con el proveedor simulado, con OpenTofu y después con
+  # Terraform, para vigilar la regla de portabilidad del ADR 0013 (solo lo que entienden los dos).
+  # No entra en GCP ni necesita credenciales; aplicar y detectar la deriva se hace con la sesión de
+  # quien aplica.
+  infraestructura:
+    runs-on: ubuntu-latest
+    env:
+      # Sin las consultas de versión y avisos de Terraform a checkpoint-api.hashicorp.com.
+      CHECKPOINT_DISABLE: 1
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # El binario y no setup-opentofu, con su suma comprobada, como Trivy y gitleaks.
+      - name: Instalar OpenTofu
+        working-directory: ${{ runner.temp }}
+        run: |
+          f="tofu_${TOFU_VERSION}_linux_amd64.zip"
+          curl -sSfL -o "$f" "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/$f"
+          echo "${TOFU_SHA256}  $f" | sha256sum -c -
+          unzip -q "$f" tofu
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Formato
+        run: tofu fmt -check -recursive -diff
+      - name: Iniciar sin estado remoto
+        run: tofu init -backend=false -input=false
+      - name: Validar
+        run: tofu validate
+      - name: Pruebas del plan
+        run: tofu test
+      # Validar en el CI propio es un uso interno que permite la licencia de Terraform (BSL 1.1).
+      - name: Instalar Terraform
+        working-directory: ${{ runner.temp }}
+        run: |
+          f="terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          curl -sSfL -o "$f" "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/$f"
+          echo "${TERRAFORM_SHA256}  $f" | sha256sum -c -
+          unzip -q "$f" terraform
+      # Terraform trabaja sobre una copia de infra/ sin .terraform ni .terraform.lock.hcl: el fichero
+      # de bloqueo versionado es el de OpenTofu (registry.opentofu.org); Terraform busca el proveedor
+      # en registry.terraform.io y lo reescribiría. Así no lo usa ni lo cambia.
+      - name: Copia de infra/ para Terraform
+        run: |
+          copia="$RUNNER_TEMP/infra-terraform"
+          cp -r . "$copia"
+          rm -rf "$copia/.terraform" "$copia/.terraform.lock.hcl"
+      - name: Iniciar con Terraform sin estado remoto
+        working-directory: ${{ runner.temp }}/infra-terraform
+        run: terraform init -backend=false -input=false
+      # Con -backend=false Terraform no lee el bloque backend. En la copia ese bloque pasa de "gcs"
+      # a "local" para que Terraform lo lea sin GCS ni credenciales. La plantilla lo deja vacío (el
+      # bucket y el prefijo van en staging.gcs.tfbackend), así que cualquier argumento en él, como
+      # una variable, que solo admite OpenTofu, falla aquí con el nombre del fichero y la línea.
+      - name: Bloque backend con Terraform
+        working-directory: ${{ runner.temp }}/infra-terraform
+        run: |
+          sed -i 's/backend "gcs"/backend "local"/' ./*.tf
+          terraform init -input=false || {
+            echo "::error::El bloque backend de infra/ debe quedar vacío y compatible con Terraform; el bucket y el prefijo van en staging.gcs.tfbackend (ADR 0013 del harness)."
+            exit 1
+          }
+      - name: Validar con Terraform
+        working-directory: ${{ runner.temp }}/infra-terraform
+        run: terraform validate
+      - name: Pruebas del plan con Terraform
+        working-directory: ${{ runner.temp }}/infra-terraform
+        run: terraform test
+
+  imagen:
+    runs-on: ubuntu-latest
+    needs: calidad
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Construir la imagen
+        run: docker build -t aplicacion:ci .
+      # El binario y no trivy-action, con su suma comprobada, como gitleaks en secretos.yml.
+      - name: Instalar Trivy
+        run: |
+          f="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sSfL -o "$f" "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/$f"
+          echo "${TRIVY_SHA256}  $f" | sha256sum -c -
+          tar -xzf "$f" trivy
+      - name: Analizar la imagen
+        run: ./trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed --no-progress aplicacion:ci
+      # En main, la imagen analizada pasa al job despliegue: se despliega la misma, no otra construida después.
+      - name: Guardar la imagen analizada
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.GCP_WIF_PROVIDER != ''
+        run: docker save aplicacion:ci | gzip > imagen.tar.gz
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.GCP_WIF_PROVIDER != ''
+        with:
+          name: imagen
+          path: imagen.tar.gz
+          retention-days: 1
+          if-no-files-found: error
+
+  # Despliegue continuo en staging (EN-FM-04, ADR 0015 del harness). Solo al integrar en main y
+  # solo en un repositorio con el despliegue configurado (las variables GCP_WIF_PROVIDER y
+  # GCP_DEPLOY_SA y el environment staging, que solo admite main); sin eso, el pipeline termina con
+  # el PR integrado. Entra en GCP con Workload Identity Federation como la cuenta de despliegue, sin
+  # claves: esa cuenta solo acepta tokens de jobs del environment staging, así que un worker, que
+  # corre en su propio job y fuera de él, no puede desplegar aunque pida un token.
+  # Sube la imagen analizada a Artifact Registry y crea una versión en la cadena de Cloud Deploy de
+  # la aplicación. El manifiesto es el del servicio desplegado con la imagen nueva: el despliegue solo
+  # cambia la imagen; el resto del servicio es de infra/ (ADR 0013).
+  despliegue:
+    needs: [calidad, imagen, infraestructura]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.GCP_WIF_PROVIDER != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: staging
+      url: ${{ steps.comprobar.outputs.url }}
+    concurrency:
+      group: despliegue-staging
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Proyecto, región, aplicación y almacén salen de infra/staging.tfvars: el mismo sitio que usa la infraestructura.
+      - name: Datos de staging
+        id: datos
+        run: |
+          valor() { sed -nE "s/^$1[[:space:]]*=[[:space:]]*\"([^\"]+)\".*/\1/p" infra/staging.tfvars; }
+          proyecto=$(valor proyecto); region=$(valor region); aplicacion=$(valor aplicacion); almacen=$(valor almacen_cloud_deploy)
+          for dato in proyecto region aplicacion almacen; do
+            test -n "${!dato}" || { echo "::error::Falta $dato en infra/staging.tfvars"; exit 1; }
+          done
+          {
+            echo "proyecto=$proyecto"
+            echo "region=$region"
+            echo "aplicacion=$aplicacion"
+            echo "almacen=$almacen"
+            echo "imagen=$region-docker.pkg.dev/$proyecto/$aplicacion/$aplicacion:$GITHUB_SHA"
+            echo "version=v-${GITHUB_SHA::7}-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: imagen
+      - name: Cargar la imagen analizada
+        run: gunzip -c imagen.tar.gz | docker load
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: Subir la imagen a Artifact Registry
+        id: subir
+        env:
+          REGION: ${{ steps.datos.outputs.region }}
+          IMAGEN: ${{ steps.datos.outputs.imagen }}
+        run: |
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          docker tag aplicacion:ci "$IMAGEN"
+          docker push "$IMAGEN"
+          # Se despliega por su digest, que no cambia aunque alguien vuelva a usar la etiqueta.
+          echo "imagen=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGEN")" >> "$GITHUB_OUTPUT"
+      - name: Manifiesto del servicio con la imagen nueva
+        env:
+          PROYECTO: ${{ steps.datos.outputs.proyecto }}
+          REGION: ${{ steps.datos.outputs.region }}
+          APLICACION: ${{ steps.datos.outputs.aplicacion }}
+          IMAGEN: ${{ steps.subir.outputs.imagen }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/despliegue"
+          gcloud run services describe "$APLICACION" --project "$PROYECTO" --region "$REGION" --format export \
+            > "$RUNNER_TEMP/despliegue/service.yaml"
+          # Solo cambia la imagen. Sin el nombre de la revisión, Cloud Run crea una nueva; sin el
+          # espacio de nombres, Cloud Deploy usa el proyecto de su destino; sin el tráfico, que
+          # Cloud Deploy fija en la revisión que despliega, no se hereda el de un despliegue fallido.
+          IMAGEN="$IMAGEN" yq -i 'del(.metadata.namespace) | del(.spec.template.metadata.name) | del(.spec.traffic) | .spec.template.spec.containers[0].image = strenv(IMAGEN)' \
+            "$RUNNER_TEMP/despliegue/service.yaml"
+          cat "$RUNNER_TEMP/despliegue/service.yaml"
+      - name: Desplegar con Cloud Deploy
+        env:
+          PROYECTO: ${{ steps.datos.outputs.proyecto }}
+          REGION: ${{ steps.datos.outputs.region }}
+          APLICACION: ${{ steps.datos.outputs.aplicacion }}
+          ALMACEN: ${{ steps.datos.outputs.almacen }}
+          VERSION: ${{ steps.datos.outputs.version }}
+        run: |
+          gcloud deploy releases create "$VERSION" --project "$PROYECTO" --region "$REGION" \
+            --delivery-pipeline "$APLICACION" --from-run-manifest "$RUNNER_TEMP/despliegue/service.yaml" \
+            --gcs-source-staging-dir "$ALMACEN/$APLICACION/fuentes" \
+            --description "Commit $GITHUB_SHA, ejecución $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          # Cloud Deploy despliega la versión en staging por su cuenta: se espera a que termine.
+          for intento in $(seq 90); do
+            estado=$(gcloud deploy rollouts list --project "$PROYECTO" --region "$REGION" \
+              --delivery-pipeline "$APLICACION" --release "$VERSION" --format 'value(state)' --limit 1)
+            echo "Despliegue en staging: ${estado:-sin empezar}"
+            case "$estado" in
+              SUCCEEDED) exit 0 ;;
+              FAILED|CANCELLED|CANCELLING|HALTED|APPROVAL_REJECTED)
+                gcloud deploy rollouts list --project "$PROYECTO" --region "$REGION" \
+                  --delivery-pipeline "$APLICACION" --release "$VERSION" --format yaml
+                exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::El despliegue en staging no ha terminado en 15 minutos"; exit 1
+      - name: Comprobar staging
+        id: comprobar
+        env:
+          PROYECTO: ${{ steps.datos.outputs.proyecto }}
+          REGION: ${{ steps.datos.outputs.region }}
+          APLICACION: ${{ steps.datos.outputs.aplicacion }}
+          IMAGEN: ${{ steps.subir.outputs.imagen }}
+        run: |
+          servicio() { gcloud run services describe "$APLICACION" --project "$PROYECTO" --region "$REGION" --format "value($1)"; }
+          desplegada=$(servicio 'spec.template.spec.containers[0].image')
+          echo "Imagen en staging: $desplegada"
+          test "$desplegada" = "$IMAGEN"
+          url=$(servicio status.url)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          curl -sSf --retry 5 --retry-all-errors "$url/api/salud"
+          echo "Desplegado $IMAGEN en $url" >> "$GITHUB_STEP_SUMMARY"

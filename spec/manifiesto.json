@@ -1,27 +1,25 @@
 {
   "schemaVersion": 1,
-  "initiative": "prueba-bucle",
+  "initiative": "prueba-dev",
   "status": "approved",
   "contexts": [
     {
-      "id": "prueba",
-      "name": "Prueba",
-      "path": "spec/contextos/prueba/",
-      "module": "src/prueba",
+      "id": "prestamos",
+      "name": "Préstamos",
+      "path": "spec/contextos/prestamos/",
+      "module": "src/prestamos",
       "stories": [
-        "HU-001",
-        "HU-002",
-        "HU-003"
+        "HU-PRE-01"
       ],
       "dependsOn": [],
-      "contracts": [],
+      "contracts": [
+        {
+          "kind": "openapi",
+          "path": "spec/contextos/prestamos/api.openapi.json"
+        }
+      ],
       "publishes": [],
       "subscribes": []
     }
-  ],
-  "approved": {
-    "at": "2026-10-30T20:00:00Z",
-    "contracts": {},
-    "lastAdr": 0
-  }
+  ]
 }

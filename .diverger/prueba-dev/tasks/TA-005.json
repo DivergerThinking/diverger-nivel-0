@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "TA-005",
+  "title": "Préstamos: devolver un equipo (HU-PRE-02)",
+  "status": "pending",
+  "story": "HU-PRE-02",
+  "context": "prestamos",
+  "modules": [
+    "src/prestamos"
+  ],
+  "contracts": [
+    "spec/contextos/prestamos/api.openapi.json"
+  ],
+  "dependsOn": [
+    "TA-009"
+  ]
+}

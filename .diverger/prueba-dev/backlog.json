@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "initiative": {
+    "id": "prueba-dev",
+    "title": "Prueba del worker de diverger-dev (EN-FM-02)",
+    "language": "es",
+    "vision": "Que IT apunte a quién ha prestado cada equipo de la oficina."
+  },
+  "epics": [
+    {
+      "id": "EP-01",
+      "title": "Préstamos",
+      "description": "Prestar y devolver equipos."
+    }
+  ],
+  "stories": [
+    {
+      "id": "HU-PRE-01",
+      "epic": "EP-01",
+      "kind": "story",
+      "title": "Prestar un equipo",
+      "role": "técnico de IT",
+      "goal": "apuntar a quién presto un equipo",
+      "benefit": "saber dónde está cada equipo",
+      "acceptanceCriteria": [
+        {
+          "type": "positive",
+          "given": "el portátil «PC-07» disponible",
+          "when": "IT lo presta a Ana Pérez",
+          "then": "el préstamo queda activo a nombre de Ana Pérez y el equipo deja de estar disponible"
+        },
+        {
+          "type": "negative",
+          "given": "el portátil «PC-07» prestado a Luis Gil",
+          "when": "IT lo presta a Ana Pérez",
+          "then": "la aplicación responde «El equipo ya está prestado» y no crea el préstamo"
+        }
+      ],
+      "priority": "must",
+      "estimate": {
+        "size": "M",
+        "hours": 4
+      },
+      "status": "approved",
+      "blockedBy": []
+    }
+  ]
+}
