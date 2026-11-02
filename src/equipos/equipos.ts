@@ -19,7 +19,14 @@ export interface DocumentoEquipo {
   devolucion?: string;
 }
 
-export type ResultadoAlta = { ok: true; equipo: Equipo } | { ok: false; error: string };
+/** Un documento por nombre normalizado en uso; su id es el nombre, así que solo cabe uno. */
+export const COLECCION_NOMBRES = "equipos_nombres";
+
+export const ERROR_NOMBRE_REPETIDO = "Ya hay un equipo con ese nombre";
+
+export type ResultadoAlta =
+  | { ok: true; equipo: Equipo }
+  | { ok: false; error: string; repetido?: boolean };
 
 export function normalizarNombre(nombre: string): string {
   return nombre.trim().toLowerCase();
@@ -31,10 +38,17 @@ export async function darDeAlta(almacen: Almacen, nombre: unknown): Promise<Resu
     return { ok: false, error: ERROR_FALTA_NOMBRE };
   }
   const id = randomUUID();
-  const documento: DocumentoEquipo = { nombre, nombreNormalizado: normalizarNombre(nombre), prestado: false };
-  await almacen.transaccion((tx) => {
+  const nombreNormalizado = normalizarNombre(nombre);
+  const documento: DocumentoEquipo = { nombre, nombreNormalizado, prestado: false };
+  // El nombre normalizado se reserva dentro de la misma transacción que crea el equipo: dos altas
+  // simultáneas con el mismo nombre no pueden crear los dos.
+  const reservado = await almacen.transaccion(async (tx) => {
+    const idReserva = `n:${encodeURIComponent(nombreNormalizado)}`;
+    if (await tx.obtener(COLECCION_NOMBRES, idReserva)) return false;
+    tx.guardar(COLECCION_NOMBRES, idReserva, { equipoId: id });
     tx.guardar(COLECCION, id, documento);
-    return Promise.resolve();
+    return true;
   });
+  if (!reservado) return { ok: false, error: ERROR_NOMBRE_REPETIDO, repetido: true };
   return { ok: true, equipo: { id, nombre, prestado: false } };
 }
