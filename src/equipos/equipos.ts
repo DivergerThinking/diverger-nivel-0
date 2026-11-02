@@ -72,6 +72,29 @@ export async function prestarEquipo(
   });
 }
 
+export const ERROR_NO_PRESTADO = "El equipo no está prestado";
+
+export type ResultadoDevolucion =
+  | { ok: true; equipo: Equipo }
+  | { ok: false; error: string; codigo: 404 | 409 };
+
+/** Apunta la devolución de un equipo prestado: queda no prestado y sin persona ni fecha. */
+export async function devolverEquipo(almacen: Almacen, id: string): Promise<ResultadoDevolucion> {
+  // Se lee y se escribe en la misma transacción: dos devoluciones a la vez no se pisan.
+  return almacen.transaccion<ResultadoDevolucion>(async (tx) => {
+    const equipo = await tx.obtener<DocumentoEquipo>(COLECCION, id);
+    if (!equipo) return { ok: false, codigo: 404, error: ERROR_NO_EXISTE };
+    if (!equipo.prestado) return { ok: false, codigo: 409, error: ERROR_NO_PRESTADO };
+    const documento: DocumentoEquipo = {
+      nombre: equipo.nombre,
+      nombreNormalizado: equipo.nombreNormalizado,
+      prestado: false,
+    };
+    tx.guardar(COLECCION, id, documento);
+    return { ok: true, equipo: { id, nombre: equipo.nombre, prestado: false } };
+  });
+}
+
 export function normalizarNombre(nombre: string): string {
   return nombre.trim().toLowerCase();
 }
