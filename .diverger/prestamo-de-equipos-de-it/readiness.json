@@ -1,0 +1,286 @@
+{
+  "confirmations": {
+    "HU-ACC-01": {
+      "DoR-04": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Reglas funcionales necesarias cerradas.",
+        "note": "Reglas y mensajes fijados en el anexo de la API de peticion.md.",
+        "source": "assumption"
+      },
+      "DoR-05": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Diseño/prototipo o referencia UI disponible cuando aplique.",
+        "note": "La interfaz web es un supuesto; la referencia es la API del anexo.",
+        "source": "assumption"
+      },
+      "DoR-06": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Fuentes/campos de datos identificados cuando aplique.",
+        "note": "Campos id, nombre, prestado, persona y devolucion del anexo.",
+        "source": "assumption"
+      },
+      "DoR-07": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Datos de prueba suficientes o estrategia de mock definida.",
+        "note": "Datos de prueba de los criterios: «Portátil 07», «Proyector sala 2», «Ana Pérez».",
+        "source": "assumption"
+      },
+      "DoR-09": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Permisos/roles definidos si afectan a la historia.",
+        "note": "Cualquier cuenta de Google válida tiene los mismos permisos; por ahora no se limita a IT.",
+        "source": "assumption"
+      }
+    },
+    "HU-EQU-01": {
+      "DoR-04": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Reglas funcionales necesarias cerradas.",
+        "note": "Reglas y mensajes fijados en el anexo de la API de peticion.md.",
+        "source": "assumption"
+      },
+      "DoR-05": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Diseño/prototipo o referencia UI disponible cuando aplique.",
+        "note": "La interfaz web es un supuesto; la referencia es la API del anexo.",
+        "source": "assumption"
+      },
+      "DoR-06": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Fuentes/campos de datos identificados cuando aplique.",
+        "note": "Campos id, nombre, prestado, persona y devolucion del anexo.",
+        "source": "assumption"
+      },
+      "DoR-07": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Datos de prueba suficientes o estrategia de mock definida.",
+        "note": "Datos de prueba de los criterios: «Portátil 07», «Proyector sala 2», «Ana Pérez».",
+        "source": "assumption"
+      },
+      "DoR-09": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Permisos/roles definidos si afectan a la historia.",
+        "note": "Cualquier cuenta de Google válida tiene los mismos permisos; por ahora no se limita a IT.",
+        "source": "assumption"
+      }
+    },
+    "HU-EQU-02": {
+      "DoR-04": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Reglas funcionales necesarias cerradas.",
+        "note": "Reglas y mensajes fijados en el anexo de la API de peticion.md.",
+        "source": "assumption"
+      },
+      "DoR-05": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Diseño/prototipo o referencia UI disponible cuando aplique.",
+        "note": "La interfaz web es un supuesto; la referencia es la API del anexo.",
+        "source": "assumption"
+      },
+      "DoR-06": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Fuentes/campos de datos identificados cuando aplique.",
+        "note": "Campos id, nombre, prestado, persona y devolucion del anexo.",
+        "source": "assumption"
+      },
+      "DoR-07": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Datos de prueba suficientes o estrategia de mock definida.",
+        "note": "Datos de prueba de los criterios: «Portátil 07», «Proyector sala 2», «Ana Pérez».",
+        "source": "assumption"
+      },
+      "DoR-09": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Permisos/roles definidos si afectan a la historia.",
+        "note": "Cualquier cuenta de Google válida tiene los mismos permisos; por ahora no se limita a IT.",
+        "source": "assumption"
+      }
+    },
+    "HU-PRE-01": {
+      "DoR-04": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Reglas funcionales necesarias cerradas.",
+        "note": "Reglas y mensajes fijados en el anexo de la API de peticion.md.",
+        "source": "assumption"
+      },
+      "DoR-05": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Diseño/prototipo o referencia UI disponible cuando aplique.",
+        "note": "La interfaz web es un supuesto; la referencia es la API del anexo.",
+        "source": "assumption"
+      },
+      "DoR-06": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Fuentes/campos de datos identificados cuando aplique.",
+        "note": "Campos id, nombre, prestado, persona y devolucion del anexo.",
+        "source": "assumption"
+      },
+      "DoR-07": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Datos de prueba suficientes o estrategia de mock definida.",
+        "note": "Datos de prueba de los criterios: «Portátil 07», «Proyector sala 2», «Ana Pérez».",
+        "source": "assumption"
+      },
+      "DoR-09": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Permisos/roles definidos si afectan a la historia.",
+        "note": "Cualquier cuenta de Google válida tiene los mismos permisos; por ahora no se limita a IT.",
+        "source": "assumption"
+      }
+    },
+    "HU-PRE-02": {
+      "DoR-04": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Reglas funcionales necesarias cerradas.",
+        "note": "Reglas y mensajes fijados en el anexo de la API de peticion.md.",
+        "source": "assumption"
+      },
+      "DoR-05": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Diseño/prototipo o referencia UI disponible cuando aplique.",
+        "note": "La interfaz web es un supuesto; la referencia es la API del anexo.",
+        "source": "assumption"
+      },
+      "DoR-06": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Fuentes/campos de datos identificados cuando aplique.",
+        "note": "Campos id, nombre, prestado, persona y devolucion del anexo.",
+        "source": "assumption"
+      },
+      "DoR-07": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Datos de prueba suficientes o estrategia de mock definida.",
+        "note": "Datos de prueba de los criterios: «Portátil 07», «Proyector sala 2», «Ana Pérez».",
+        "source": "assumption"
+      },
+      "DoR-09": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Permisos/roles definidos si afectan a la historia.",
+        "note": "Cualquier cuenta de Google válida tiene los mismos permisos; por ahora no se limita a IT.",
+        "source": "assumption"
+      }
+    },
+    "HU-PRE-03": {
+      "DoR-04": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Reglas funcionales necesarias cerradas.",
+        "note": "Reglas y mensajes fijados en el anexo de la API de peticion.md.",
+        "source": "assumption"
+      },
+      "DoR-05": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Diseño/prototipo o referencia UI disponible cuando aplique.",
+        "note": "La interfaz web es un supuesto; la referencia es la API del anexo.",
+        "source": "assumption"
+      },
+      "DoR-06": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Fuentes/campos de datos identificados cuando aplique.",
+        "note": "Campos id, nombre, prestado, persona y devolucion del anexo.",
+        "source": "assumption"
+      },
+      "DoR-07": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Datos de prueba suficientes o estrategia de mock definida.",
+        "note": "Datos de prueba de los criterios: «Portátil 07», «Proyector sala 2», «Ana Pérez».",
+        "source": "assumption"
+      },
+      "DoR-09": {
+        "answer": "assumed",
+        "at": "2026-11-02T19:00:25Z",
+        "criterion": "Permisos/roles definidos si afectan a la historia.",
+        "note": "Cualquier cuenta de Google válida tiene los mismos permisos; por ahora no se limita a IT.",
+        "source": "assumption"
+      }
+    }
+  },
+  "exceptions": {
+    "HU-ACC-01": {
+      "at": "2026-11-02T20:44:16Z",
+      "reason": "Resuelto en el repositorio: infra/staging.tfvars: google_client_id con el ID del cliente OAuth de la aplicación. Supuesto razonable para la cuenta de servicio del inventario: el servidor acepta cualquier token de Google emitido para ese cliente, así que la historia se puede construir y probar sin ella.",
+      "source": "assumption"
+    },
+    "HU-EQU-01": {
+      "at": "2026-11-02T20:44:16Z",
+      "reason": "Supuesto razonable: su bloqueadora HU-ACC-01 se planifica antes, en el mismo sprint o en uno anterior.",
+      "source": "assumption"
+    },
+    "HU-EQU-02": {
+      "at": "2026-11-02T20:44:16Z",
+      "reason": "Supuesto razonable: su bloqueadora HU-EQU-01 se planifica antes, en el mismo sprint o en uno anterior.",
+      "source": "assumption"
+    },
+    "HU-PRE-01": {
+      "at": "2026-11-02T20:44:16Z",
+      "reason": "Supuesto razonable: su bloqueadora HU-EQU-01 se planifica antes, en el mismo sprint o en uno anterior.",
+      "source": "assumption"
+    },
+    "HU-PRE-02": {
+      "at": "2026-11-02T20:44:16Z",
+      "reason": "Supuesto razonable: su bloqueadora HU-PRE-01 se planifica antes, en el mismo sprint o en uno anterior.",
+      "source": "assumption"
+    },
+    "HU-PRE-03": {
+      "at": "2026-11-02T20:44:16Z",
+      "reason": "Supuesto razonable: su bloqueadora HU-PRE-01 se planifica antes, en el mismo sprint o en uno anterior.",
+      "source": "assumption"
+    }
+  },
+  "notes": {},
+  "version": 1,
+  "written": {
+    "HU-ACC-01": {
+      "pending": "DoR-08: dependencias externas sin plan confirmado: Cliente OAuth de la aplicación en Google; Cuenta de servicio de Google del inventario de IT · supuestos sin confirmar: DoR-04, DoR-05, DoR-06, DoR-07, DoR-09",
+      "state": "partial"
+    },
+    "HU-EQU-01": {
+      "pending": "DoR-08: depende de HU-ACC-01, sin resolver ni planificada en un sprint anterior · supuestos sin confirmar: DoR-04, DoR-05, DoR-06, DoR-07, DoR-09",
+      "state": "partial"
+    },
+    "HU-EQU-02": {
+      "pending": "DoR-08: depende de HU-EQU-01, sin resolver ni planificada en un sprint anterior · supuestos sin confirmar: DoR-04, DoR-05, DoR-06, DoR-07, DoR-09",
+      "state": "partial"
+    },
+    "HU-PRE-01": {
+      "pending": "DoR-08: depende de HU-EQU-01, sin resolver ni planificada en un sprint anterior · supuestos sin confirmar: DoR-04, DoR-05, DoR-06, DoR-07, DoR-09",
+      "state": "partial"
+    },
+    "HU-PRE-02": {
+      "pending": "DoR-08: depende de HU-PRE-01, sin resolver ni planificada en un sprint anterior · supuestos sin confirmar: DoR-04, DoR-05, DoR-06, DoR-07, DoR-09",
+      "state": "partial"
+    },
+    "HU-PRE-03": {
+      "pending": "DoR-08: depende de HU-PRE-01, sin resolver ni planificada en un sprint anterior · supuestos sin confirmar: DoR-04, DoR-05, DoR-06, DoR-07, DoR-09",
+      "state": "partial"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+flowchart LR
+    EP_02["EP-02 · Equipos de la oficina"]
+    HU_EQU_01["HU-EQU-01 · Dar de alta un equipo · publicada"]
+    EP_02 --> HU_EQU_01
+    HU_EQU_02["HU-EQU-02 · Ver qué equipos están prestados · publicada"]
+    EP_02 --> HU_EQU_02
+    HU_ACC_01["HU-ACC-01 · Entrar con la cuenta de Google · publicada"]
+    HU_ACC_01 -.->|bloquea| HU_EQU_01
+    HU_EQU_01 -.->|bloquea| HU_EQU_02
+    classDef epic fill:#ede7f6,stroke:#5e35b1,color:#311b92
+    classDef published fill:#e8f5e9,stroke:#43a047,color:#1b5e20
+    classDef external fill:#ffffff,stroke:#9e9e9e,color:#616161,stroke-dasharray:2 2
+    class EP_02 epic
+    class HU_EQU_01,HU_EQU_02 published
+    class HU_ACC_01 external

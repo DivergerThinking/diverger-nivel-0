@@ -1,0 +1,65 @@
+[
+  {
+    "id": "initiative-map",
+    "title": "Mapa de la iniciativa",
+    "kind": "flowchart",
+    "scope": "initiative",
+    "source": "backlog",
+    "mmd": "initiative-map.mmd",
+    "png": "initiative-map.png"
+  },
+  {
+    "id": "dependencies",
+    "title": "Dependencias entre historias",
+    "kind": "flowchart",
+    "scope": "initiative",
+    "source": "backlog",
+    "mmd": "dependencies.mmd",
+    "png": "dependencies.png"
+  },
+  {
+    "id": "sprints",
+    "title": "Calendario de sprints",
+    "kind": "gantt",
+    "scope": "initiative",
+    "source": "backlog",
+    "mmd": "sprints.mmd",
+    "png": "sprints.png"
+  },
+  {
+    "id": "epic-ep-01",
+    "title": "Épica EP-01: Acceso con Google",
+    "kind": "flowchart",
+    "scope": "epic:EP-01",
+    "source": "backlog",
+    "mmd": "epic-ep-01.mmd",
+    "png": "epic-ep-01.png"
+  },
+  {
+    "id": "epic-ep-02",
+    "title": "Épica EP-02: Equipos de la oficina",
+    "kind": "flowchart",
+    "scope": "epic:EP-02",
+    "source": "backlog",
+    "mmd": "epic-ep-02.mmd",
+    "png": "epic-ep-02.png"
+  },
+  {
+    "id": "epic-ep-03",
+    "title": "Épica EP-03: Préstamos y devoluciones",
+    "kind": "flowchart",
+    "scope": "epic:EP-03",
+    "source": "backlog",
+    "mmd": "epic-ep-03.mmd",
+    "png": "epic-ep-03.png"
+  },
+  {
+    "id": "intent-estados-de-un-equipo",
+    "title": "Estados de un equipo",
+    "kind": "state",
+    "scope": "initiative",
+    "source": "intent",
+    "mmd": "intent-estados-de-un-equipo.mmd",
+    "png": "intent-estados-de-un-equipo.png"
+  }
+]

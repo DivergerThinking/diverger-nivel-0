@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "HU-EQU-02-equipos",
+  "title": "Equipos: ver qué equipos están prestados (HU-EQU-02)",
+  "status": "pending",
+  "story": "HU-EQU-02",
+  "context": "equipos",
+  "modules": ["src/equipos"],
+  "contracts": ["spec/contextos/equipos/api.openapi.json"],
+  "dependsOn": ["HU-EQU-01-equipos"]
+}

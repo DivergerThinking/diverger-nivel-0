@@ -1,0 +1,14 @@
+flowchart LR
+    HU_ACC_01["HU-ACC-01 · Entrar con la cuenta de Google · publicada"]
+    HU_EQU_01["HU-EQU-01 · Dar de alta un equipo · publicada"]
+    HU_EQU_02["HU-EQU-02 · Ver qué equipos están prestados · publicada"]
+    HU_PRE_01["HU-PRE-01 · Apuntar un préstamo · publicada"]
+    HU_PRE_02["HU-PRE-02 · Comprobar la fecha de devolución · publicada"]
+    HU_PRE_03["HU-PRE-03 · Apuntar la devolución · publicada"]
+    HU_ACC_01 --> HU_EQU_01
+    HU_EQU_01 --> HU_EQU_02
+    HU_EQU_01 --> HU_PRE_01
+    HU_PRE_01 --> HU_PRE_02
+    HU_PRE_01 --> HU_PRE_03
+    classDef published fill:#e8f5e9,stroke:#43a047,color:#1b5e20
+    class HU_ACC_01,HU_EQU_01,HU_EQU_02,HU_PRE_01,HU_PRE_02,HU_PRE_03 published
