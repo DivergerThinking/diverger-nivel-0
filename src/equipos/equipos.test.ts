@@ -125,6 +125,75 @@ describe("POST /api/equipos/{id}/prestamo", () => {
   });
 });
 
+describe("POST /api/equipos/{id}/devolucion", () => {
+  async function conPrestado() {
+    const { almacen, app, enviar } = await preparar();
+    const equipo = (await enviar({ nombre: "Portátil 07" })).json<Equipo>();
+    const cabeceras = { authorization: "Bearer valido" };
+    await app.inject({
+      method: "POST",
+      url: `/api/equipos/${equipo.id}/prestamo`,
+      headers: cabeceras,
+      payload: { persona: "Ana Pérez", devolucion: "2026-11-20" },
+    });
+    const devolver = (id = equipo.id) =>
+      app.inject({ method: "POST", url: `/api/equipos/${id}/devolucion`, headers: cabeceras });
+    const guardado = () => almacen.obtener<Record<string, unknown>>(COLECCION, equipo.id);
+    return { app, equipo, devolver, guardado };
+  }
+
+  it("apunta la devolución, responde 200 con prestado false y lo guarda sin préstamo", async () => {
+    const { equipo, devolver, guardado } = await conPrestado();
+    const respuesta = await devolver();
+    expect(respuesta.statusCode).toBe(200);
+    expect(respuesta.json()).toEqual({ id: equipo.id, nombre: "Portátil 07", prestado: false });
+    const documento = await guardado();
+    expect(documento?.prestado).toBe(false);
+    expect(documento).not.toHaveProperty("persona");
+    expect(documento).not.toHaveProperty("devolucion");
+  });
+
+  it("responde 409 si el equipo no está prestado", async () => {
+    const { devolver } = await conPrestado();
+    await devolver();
+    const respuesta = await devolver();
+    expect(respuesta.statusCode).toBe(409);
+    expect(respuesta.json()).toEqual({ error: "El equipo no está prestado" });
+  });
+
+  it("responde 404 si el equipo no existe", async () => {
+    const { devolver } = await conPrestado();
+    const respuesta = await devolver("no-existe");
+    expect(respuesta.statusCode).toBe(404);
+    expect(respuesta.json()).toEqual({ error: "No existe el equipo" });
+  });
+
+  it("solo devuelve una vez si llegan dos devoluciones a la vez", async () => {
+    const { devolver } = await conPrestado();
+    const respuestas = await Promise.all([devolver(), devolver()]);
+    expect(respuestas.map((r) => r.statusCode).sort()).toEqual([200, 409]);
+  });
+
+  it("permite volver a prestar el equipo devuelto", async () => {
+    const { app, equipo, devolver } = await conPrestado();
+    await devolver();
+    const respuesta = await app.inject({
+      method: "POST",
+      url: `/api/equipos/${equipo.id}/prestamo`,
+      headers: { authorization: "Bearer valido" },
+      payload: { persona: "Luis Gómez", devolucion: "2026-12-01" },
+    });
+    expect(respuesta.statusCode).toBe(201);
+  });
+
+  it("responde 401 sin token y no devuelve el equipo", async () => {
+    const { app, equipo, guardado } = await conPrestado();
+    const respuesta = await app.inject({ method: "POST", url: `/api/equipos/${equipo.id}/devolucion` });
+    expect(respuesta.statusCode).toBe(401);
+    expect((await guardado())?.prestado).toBe(true);
+  });
+});
+
 describe("POST /api/equipos", () => {
   it("da de alta un equipo no prestado y lo guarda", async () => {
     const { almacen, enviar } = await preparar();
