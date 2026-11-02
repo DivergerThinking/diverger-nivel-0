@@ -163,9 +163,9 @@ describe("forma del workflow del worker", () => {
 
   it("tiene topes de turnos, de gasto y de tiempo por intento", () => {
     expect(MODELO_SH).toMatch(/--max-turns "\$MAX_TURNOS"/);
-    expect(MODELO_SH).toMatch(/--max-budget-usd "\$MAX_USD"/);
+    expect(MODELO_SH).toMatch(/--max-budget-usd "\$restante"/);
     expect(JOB.env.MAX_TURNOS).toBe("${{ vars.DIVERGER_WORKER_MAX_TURNS || '40' }}");
-    expect(JOB.env.MAX_USD).toBe("${{ vars.DIVERGER_WORKER_MAX_BUDGET_USD || '2.00' }}");
+    expect(JOB.env.MAX_USD).toBe("${{ inputs.max-usd || vars.DIVERGER_WORKER_MAX_BUDGET_USD || '10.00' }}");
     const pasosConTope = PASOS.filter((p) => p.name?.startsWith("Worker") || p.id?.startsWith("comprobaciones-"));
     const total = pasosConTope.reduce((suma, p) => suma + (p["timeout-minutes"] ?? Infinity), 0);
     expect(total).toBeLessThanOrEqual(3 * 35);
