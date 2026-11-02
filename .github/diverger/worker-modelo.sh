@@ -23,14 +23,19 @@ intento="${1:?Falta el número de intento}"
 [[ "$intento" =~ ^[1-9]$ ]] || fallar "El intento «$intento» no es válido"
 [ -n "${PLUGIN_DEV:-}" ] && [ -f "$PLUGIN_DEV/.claude-plugin/plugin.json" ] || fallar "No está el plugin diverger-dev en ${PLUGIN_DEV:-?}"
 
+# Este paso tiene la clave de Anthropic: el PATH es fijo, con el Claude Code que instaló el job (CLAUDE_BIN, salida de
+# su paso) y las herramientas del sistema, aunque algo haya añadido carpetas con GITHUB_PATH (harness#497).
+[ -n "${CLAUDE_BIN:-}" ] && [ -x "$CLAUDE_BIN/claude" ] || fallar "No está Claude Code en ${CLAUDE_BIN:-?}"
+export PATH="$CLAUDE_BIN:/usr/bin:/bin"
+
 # El modelo no necesita pedir tokens de GitHub ni de GCP: se le quitan del entorno. Aunque los consiguiera,
 # solo valen para la cuenta de telemetría, que solo escribe logs y métricas.
 unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL GOOGLE_APPLICATION_CREDENTIALS \
   CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE GOOGLE_GHA_CREDS_PATH
 
 # El tope es del job, no de cada intento (ADR 0024): --max-budget-usd no cuenta lo gastado antes de reanudar, así
-# que cada intento recibe lo que queda. GASTADO llega de la salida del paso anterior, que el código de las
-# comprobaciones no puede cambiar. Una sesión reanudada ya incluye el gasto anterior: es un total, no se suma.
+# que cada intento recibe lo que queda. TOPE_JOB y GASTADO llegan de las salidas de pasos anteriores, que el código de
+# las comprobaciones no puede cambiar. Una sesión reanudada ya incluye el gasto anterior: es un total, no se suma.
 tope="${TOPE_JOB:-$MAX_USD}"
 gastado="${GASTADO:-0}"
 restante=$(awk -v tope="$tope" -v gastado="$gastado" 'BEGIN { printf "%.2f", tope - gastado }')
@@ -52,7 +57,7 @@ $(tail -n 150 "$RUNNER_TEMP/comprobaciones-$anterior.log")"
 fi
 
 set +e
-claude -p "$instrucciones" "${sesion[@]}" \
+"$CLAUDE_BIN/claude" -p "$instrucciones" "${sesion[@]}" \
   --model "$MODELO" --permission-mode dontAsk \
   --plugin-dir "$PLUGIN_DEV" \
   --tools "Read,Glob,Grep,Edit,Write,Skill" \

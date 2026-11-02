@@ -3,10 +3,12 @@
 # falle o se cancele. INTENTOS trae, por cada paso del modelo, «resultado:coste» de las salidas de los pasos, que
 # el código de las comprobaciones no puede cambiar. Los intentos 2 y 3 reanudan la sesión y su coste ya incluye lo
 # anterior: vale el último, nunca la suma. Si un intento se lanzó y no dejó coste, no hay fichero y el bucle cuenta
-# el tope entero: nunca se queda corto.
+# el tope entero: nunca se queda corto. La carpeta se vacía antes: un coste.json que ya estuviera, de quien fuera, no
+# se sube nunca (harness#497).
 set -euo pipefail
 
-mkdir -p "$RUNNER_TEMP/coste"
+rm -rf "$RUNNER_TEMP/coste"
+mkdir "$RUNNER_TEMP/coste"
 coste=""
 for intento in ${INTENTOS:-}; do
   resultado=${intento%%:*}

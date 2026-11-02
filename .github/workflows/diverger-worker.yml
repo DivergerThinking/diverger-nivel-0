@@ -14,13 +14,17 @@ run-name: diverger-worker ${{ inputs.task }} ${{ inputs.run }}
 # Telemetría (ADR 0007 del harness): si el repositorio tiene GCP_WIF_PROVIDER y GCP_TELEMETRY_SA, el
 # job arranca un OpenTelemetry Collector en el runner con la cuenta diverger-telemetry, que solo
 # escribe logs y métricas. Para eso tiene id-token: write. En GCP, esa cuenta solo la aceptan este
-# workflow y worker-humo.yml, y la de despliegue solo el environment staging, que este job no usa: con
-# su token, el worker no puede desplegar.
+# workflow, worker-humo.yml y diverger-bucle.yml, y la de despliegue solo el environment staging, que
+# este job no usa: con su token, el worker no puede desplegar.
 #
 # El modelo construye la tarea con la skill implement de diverger-dev (EN-FM-02), sin Bash. Las
 # comprobaciones del proyecto (npm run check) las ejecuta el job en otro paso, sin la clave de Anthropic;
 # si fallan, el modelo sigue en la misma sesión con su salida, hasta tres intentos (EN-EJE-03). Con las
 # comprobaciones en verde, el job marca la tarea como hecha y abre la PR.
+#
+# Las comprobaciones ejecutan código del modelo: corren en un contenedor que solo ve el worktree (harness#497). Lo
+# que pasa a los pasos con la clave (el tope, el coste, la ruta de Claude Code) va por salidas de pasos, no por
+# GITHUB_ENV ni GITHUB_PATH.
 
 on:
   workflow_dispatch:
@@ -56,6 +60,7 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
+      actions: read # Solo para saber quién lanzó la ejecución (EN-OPS-06).
       id-token: write # Solo para la cuenta de telemetría (ADR 0007).
     env:
       INICIATIVA: ${{ inputs.initiative }}
@@ -75,6 +80,8 @@ jobs:
       TELEMETRIA: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_TELEMETRY_SA != '' }}
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
       COLLECTOR_IMAGE: us-docker.pkg.dev/cloud-ops-agents-artifacts/google-cloud-opentelemetry-collector/otelcol-google:0.163.1
+      # Imagen de las comprobaciones (npm run check), fija por su digest: la misma versión mayor de Node que setup-node.
+      IMAGEN_COMPROBACIONES: node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
     steps:
       # Las entradas llegan de fuera: se comprueban antes de usarlas y nunca se pegan en un script.
       - name: Comprobar las entradas
@@ -129,7 +136,12 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
-      - run: npm install -g @anthropic-ai/claude-code@2.1.296
+      # La carpeta de Claude Code sale como salida del paso: los pasos con la clave la usan con un PATH fijo.
+      - name: Instalar Claude Code
+        id: claude
+        run: |
+          npm install -g @anthropic-ai/claude-code@2.1.296
+          echo "bin=$(npm prefix -g)/bin" >> "$GITHUB_OUTPUT"
 
       # Telemetría (ADR 0007). La cuenta de telemetría solo escribe logs y métricas; la configuración
       # del Collector y del exportador sale del checkout de la rama base, no del worktree del modelo.
@@ -189,16 +201,22 @@ jobs:
       # ejecuta las comprobaciones en otro paso, sin la clave de Anthropic (worker-comprobar.sh). Los
       # scripts salen del checkout de la rama base, no del worktree que cambia el modelo.
       # max-usd solo puede bajar el tope: el techo es budget.maxWorkerUsd de la rama base, que protege CODEOWNERS.
+      # Va como salida del paso, no en GITHUB_ENV (harness#497).
       - name: Tope del job
+        id: tope
         run: |
           techo=$(jq -r '.budget.maxWorkerUsd // 10' .diverger/settings.json 2>/dev/null || echo 10)
-          awk -v tope="$MAX_USD" -v techo="$techo" 'BEGIN { printf "TOPE_JOB=%.2f\n", (tope + 0 < techo + 0 ? tope : techo) }' >> "$GITHUB_ENV"
+          awk -v tope="$MAX_USD" -v techo="$techo" 'BEGIN { printf "tope=%.2f\n", (tope + 0 < techo + 0 ? tope : techo) }' >> "$GITHUB_OUTPUT"
       - name: Worker
         id: worker-1
         timeout-minutes: 20
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          TOPE_JOB: ${{ steps.tope.outputs.tope }}
+          CLAUDE_BIN: ${{ steps.claude.outputs.bin }}
+          BASH_ENV: ""
+          ENV: ""
         working-directory: ${{ env.WORKTREE }}
         run: bash "$GITHUB_WORKSPACE/.github/diverger/worker-modelo.sh" 1
       - name: Comprobaciones
@@ -215,6 +233,10 @@ jobs:
           GASTADO: ${{ steps.worker-1.outputs.coste }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          TOPE_JOB: ${{ steps.tope.outputs.tope }}
+          CLAUDE_BIN: ${{ steps.claude.outputs.bin }}
+          BASH_ENV: ""
+          ENV: ""
         working-directory: ${{ env.WORKTREE }}
         run: bash "$GITHUB_WORKSPACE/.github/diverger/worker-modelo.sh" 2
       - name: Comprobaciones, intento 2
@@ -232,6 +254,10 @@ jobs:
           GASTADO: ${{ steps.worker-2.outputs.coste || steps.worker-1.outputs.coste }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          TOPE_JOB: ${{ steps.tope.outputs.tope }}
+          CLAUDE_BIN: ${{ steps.claude.outputs.bin }}
+          BASH_ENV: ""
+          ENV: ""
         working-directory: ${{ env.WORKTREE }}
         run: bash "$GITHUB_WORKSPACE/.github/diverger/worker-modelo.sh" 3
       - name: Comprobaciones, intento 3
@@ -279,11 +305,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           APP: ${{ steps.token.outputs.app-slug }}
-          LANZADO_POR: ${{ github.actor }}
-          LANZADO_POR_ID: ${{ github.actor_id }}
         run: |
           fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
           id=$(gh api "users/$APP%5Bbot%5D" -q .id) || fallar "No se encuentra el usuario de la App $APP"
+          # Quién lanzó la ejecución (EN-OPS-06): github.actor de este job o, si lo lanzó el bucle con la
+          # identidad del harness, el del bucle. Lo dice GitHub, no el modelo; el script es el de la rama base.
+          persona=$(node "$GITHUB_WORKSPACE/scripts/lanzador.mjs" "$GITHUB_RUN_ID" "$INICIATIVA" 2>"$RUNNER_TEMP/lanzador") \
+            || fallar "No se sabe quién lanzó la ejecución: $(cat "$RUNNER_TEMP/lanzador")"
+          LANZADO_POR=$(jq -r .login <<< "$persona")
+          LANZADO_POR_ID=$(jq -r .id <<< "$persona")
+          LANZADO_POR_NOMBRE=$(jq -r .nombre <<< "$persona")
+          echo "LANZADO_POR=$LANZADO_POR" >> "$GITHUB_ENV"
           titulo=$(jq -r .title "$FICHERO_TAREA")
           git -c core.hooksPath=/dev/null \
             -c user.name="$APP[bot]" -c user.email="$id+$APP[bot]@users.noreply.github.com" \
@@ -292,14 +324,13 @@ jobs:
             --trailer "Diverger-Modelo: $MODELO" \
             --trailer "Diverger-Tarea: $TAREA" \
             --trailer "Diverger-Iniciado-por: $LANZADO_POR" \
-            --trailer "Co-authored-by: $LANZADO_POR <$LANZADO_POR_ID+$LANZADO_POR@users.noreply.github.com>"
+            --trailer "Co-authored-by: $LANZADO_POR_NOMBRE <$LANZADO_POR_ID+$LANZADO_POR@users.noreply.github.com>"
           git log -1 --format=%B
 
       - name: Rama y PR
         working-directory: ${{ env.WORKTREE }}
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
-          LANZADO_POR: ${{ github.actor }}
         run: |
           fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
           repo="$GITHUB_REPOSITORY"
