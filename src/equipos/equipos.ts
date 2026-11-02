@@ -1,4 +1,5 @@
 // Lógica interna del contexto: los demás contextos no pueden importar este fichero.
+import { randomUUID } from "node:crypto";
 import type { Almacen } from "../../lib/datos.js";
 import type { components } from "./api.gen.js";
 
@@ -24,6 +25,34 @@ function aEquipo(documento: DocumentoEquipo): Equipo {
     equipo.devolucion = documento.devolucion;
   }
   return equipo;
+}
+
+export const COLECCION_NOMBRES = "equipos_nombres";
+
+/** Resultado de dar de alta un equipo: el equipo creado o el motivo por el que no se crea. */
+export type ResultadoAlta = { equipo: Equipo } | { error: "FALTA_NOMBRE" | "NOMBRE_REPETIDO" };
+
+/** Nombre normalizado: sin espacios al principio ni al final y en minúsculas. */
+export function normalizarNombre(nombre: string): string {
+  return nombre.trim().toLowerCase();
+}
+
+/** Da de alta un equipo sin prestar; el nombre es único una vez normalizado. */
+export async function crearEquipo(almacen: Almacen, nombre: unknown): Promise<ResultadoAlta> {
+  if (typeof nombre !== "string") return { error: "FALTA_NOMBRE" };
+  const nombreLimpio = nombre.trim();
+  if (nombreLimpio === "") return { error: "FALTA_NOMBRE" };
+  const nombreNormalizado = normalizarNombre(nombreLimpio);
+
+  return almacen.transaccion<ResultadoAlta>(async (tx) => {
+    if ((await tx.obtener(COLECCION_NOMBRES, nombreNormalizado)) !== undefined) {
+      return { error: "NOMBRE_REPETIDO" };
+    }
+    const documento: DocumentoEquipo = { id: randomUUID(), nombre: nombreLimpio, nombreNormalizado, prestado: false };
+    tx.guardar(COLECCION_NOMBRES, nombreNormalizado, { id: documento.id });
+    tx.guardar(COLECCION_EQUIPOS, documento.id, documento);
+    return { equipo: aEquipo(documento) };
+  });
 }
 
 export async function listarEquipos(almacen: Almacen): Promise<Equipo[]> {

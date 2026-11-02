@@ -2,10 +2,16 @@
   "schemaVersion": 1,
   "id": "HU-EQU-01-equipos",
   "title": "Equipos: dar de alta un equipo (HU-EQU-01)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-EQU-01",
   "context": "equipos",
-  "modules": ["src/equipos"],
-  "contracts": ["spec/contextos/equipos/api.openapi.json"],
-  "dependsOn": ["HU-ACC-01-equipos"]
+  "modules": [
+    "src/equipos"
+  ],
+  "contracts": [
+    "spec/contextos/equipos/api.openapi.json"
+  ],
+  "dependsOn": [
+    "HU-ACC-01-equipos"
+  ]
 }
