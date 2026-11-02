@@ -2,10 +2,16 @@
   "schemaVersion": 1,
   "id": "HU-INV-02-equipos",
   "title": "Equipos: impedir nombres de equipo repetidos (HU-INV-02)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-INV-02",
   "context": "equipos",
-  "modules": ["src/equipos"],
-  "contracts": ["spec/contextos/equipos/api.openapi.json"],
-  "dependsOn": ["HU-INV-01-equipos"]
+  "modules": [
+    "src/equipos"
+  ],
+  "contracts": [
+    "spec/contextos/equipos/api.openapi.json"
+  ],
+  "dependsOn": [
+    "HU-INV-01-equipos"
+  ]
 }

@@ -13,7 +13,7 @@ type NuevoEquipo = components["schemas"]["NuevoEquipo"];
 export const rutas: FastifyPluginAsync<OpcionesContexto> = (app, { almacen }) => {
   app.post<{ Body: NuevoEquipo | null }>("/api/equipos", async (request, reply) => {
     const resultado = await darDeAlta(almacen, request.body?.nombre);
-    if (!resultado.ok) return reply.code(400).send({ error: resultado.error });
+    if (!resultado.ok) return reply.code(resultado.repetido ? 409 : 400).send({ error: resultado.error });
     return reply.code(201).send(resultado.equipo);
   });
   return Promise.resolve();
