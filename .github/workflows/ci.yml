@@ -1,6 +1,7 @@
 name: ci
 
-# CI de cada PR: trailers de autoría, lint, contratos, dependencias entre contextos, tipos, tests, dependencias con
+# CI de cada PR: trailers de autoría, lint, contratos, dependencias entre contextos, tipos, tests (también en el
+# contenedor de las comprobaciones del worker), dependencias con
 # vulnerabilidades conocidas (SCA), la infraestructura como código y la imagen del contenedor con
 # su análisis. El análisis del código (SAST) está en codeql.yml y el de secretos en secretos.yml.
 # Al integrar en main, el job «despliegue» lleva a staging la imagen ya analizada (EN-FM-04).
@@ -51,6 +52,20 @@ jobs:
         run: npm test
       - name: Dependencias con vulnerabilidades conocidas (SCA)
         run: npm audit --audit-level=high
+
+  # Las comprobaciones como las ejecuta el worker (harness#533): npm run check con worker-comprobar.sh, en su
+  # contenedor y con la imagen fijada en diverger-worker.yml. Así sale en la PR que lo rompe lo que solo falla
+  # allí, como un test que necesita una herramienta que la imagen no trae.
+  contenedor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Comprobaciones en el contenedor del worker
+        run: |
+          imagen=$(sed -n 's/^ *IMAGEN_COMPROBACIONES: *//p' .github/workflows/diverger-worker.yml)
+          [ -n "$imagen" ] || { echo "::error::No encuentro IMAGEN_COMPROBACIONES en diverger-worker.yml"; exit 1; }
+          git worktree add --quiet --detach "$RUNNER_TEMP/worktree" HEAD
+          IMAGEN_COMPROBACIONES="$imagen" WORKTREE="$RUNNER_TEMP/worktree" bash .github/diverger/worker-comprobar.sh 1
 
   # Cada commit de un agente lleva los trailers de rol, modelo y tarea (scripts/git-hooks), y cada
   # commit del harness dice qué persona lo lanzó, la misma que lanzó su ejecución (EN-OPS-06).
