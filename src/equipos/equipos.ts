@@ -56,7 +56,16 @@ export async function crearEquipo(almacen: Almacen, nombre: unknown): Promise<Re
 }
 
 /** Resultado de apuntar un préstamo: el equipo prestado o el motivo por el que no se presta. */
-export type ResultadoPrestamo = { equipo: Equipo } | { error: "NO_EXISTE" | "FALTAN_DATOS" | "YA_PRESTADO" };
+export type ResultadoPrestamo = { equipo: Equipo } | { error: "NO_EXISTE" | "FALTAN_DATOS" | "FECHA_NO_VALIDA" | "YA_PRESTADO" };
+
+/** Una fecha AAAA-MM-DD es válida si corresponde a un día que existe en el calendario; puede ser pasada. */
+export function esFechaValida(fecha: string): boolean {
+  const partes = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fecha);
+  if (partes === null) return false;
+  const [anio, mes, dia] = [Number(partes[1]), Number(partes[2]), Number(partes[3])];
+  const real = new Date(Date.UTC(anio, mes - 1, dia));
+  return real.getUTCFullYear() === anio && real.getUTCMonth() === mes - 1 && real.getUTCDate() === dia;
+}
 
 /** Presta un equipo libre a una persona hasta la fecha de devolución, que se guarda tal como llega. */
 export async function prestarEquipo(
@@ -71,6 +80,7 @@ export async function prestarEquipo(
     if (typeof persona !== "string" || persona.trim() === "" || typeof devolucion !== "string" || devolucion.trim() === "") {
       return { error: "FALTAN_DATOS" };
     }
+    if (!esFechaValida(devolucion)) return { error: "FECHA_NO_VALIDA" };
     if (documento.prestado) return { error: "YA_PRESTADO" };
     const prestado: DocumentoEquipo = { ...documento, prestado: true, persona: persona.trim(), devolucion };
     tx.guardar(COLECCION_EQUIPOS, id, prestado);

@@ -24,6 +24,7 @@ export const rutas: FastifyPluginAsync<OpcionesContexto> = (app, { almacen }) =>
     if ("equipo" in resultado) return reply.code(201).send(resultado.equipo);
     if (resultado.error === "NO_EXISTE") return reply.code(404).send({ error: "No existe el equipo" });
     if (resultado.error === "FALTAN_DATOS") return reply.code(400).send({ error: "Faltan la persona o la fecha de devolución" });
+    if (resultado.error === "FECHA_NO_VALIDA") return reply.code(400).send({ error: "La fecha de devolución no es válida" });
     return reply.code(409).send({ error: "El equipo ya está prestado" });
   });
   return Promise.resolve();
