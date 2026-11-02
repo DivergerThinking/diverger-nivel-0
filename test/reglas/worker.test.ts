@@ -54,7 +54,7 @@ describe("forma del workflow del worker", () => {
   it("se lanza solo con workflow_dispatch y las entradas initiative, task y run", () => {
     expect(Object.keys(WF.on)).toEqual(["workflow_dispatch"]);
     const entradas = WF.on.workflow_dispatch.inputs;
-    expect(Object.keys(entradas)).toEqual(["initiative", "task", "run"]);
+    expect(Object.keys(entradas)).toEqual(["initiative", "task", "max-usd", "run"]);
     for (const entrada of Object.values(entradas)) expect(entrada).toMatchObject({ required: true, type: "string" });
   });
 
@@ -120,7 +120,7 @@ describe("forma del workflow del worker", () => {
 
   it("el modelo solo recibe la clave de Anthropic, ningún token de GitHub", () => {
     for (const nombre of ["Worker", "Worker, intento 2", "Worker, intento 3"]) {
-      expect(Object.keys(paso(nombre).env ?? {}).sort()).toEqual(["ANTHROPIC_API_KEY", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]);
+      expect(Object.keys(Object.fromEntries(Object.entries(paso(nombre).env).filter(([k]) => k !== "GASTADO")) ?? {}).sort()).toEqual(["ANTHROPIC_API_KEY", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]);
       expect(paso(nombre).run).toMatch(/^bash "\$GITHUB_WORKSPACE\/\.github\/diverger\/worker-modelo\.sh" [123]$/);
     }
     for (const anterior of PASOS.slice(0, indice("Worker"))) {
