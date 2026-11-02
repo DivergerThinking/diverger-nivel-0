@@ -97,6 +97,25 @@ jobs:
           permission-actions: write
           permission-contents: read
           permission-pull-requests: read
+      # El gasto vive en run.json, que no se versiona: sin esto, relanzar en un job nuevo lo pondría a cero (ADR 0024).
+      - name: Recuperar el estado anterior
+        env:
+          GH_TOKEN: ${{ steps.token-bucle.outputs.token }}
+        run: |
+          # Solo ejecuciones de este workflow en la rama base, y solo run.json. Si GitHub no responde, el job falla:
+          # seguir sin el estado pondría el gasto a cero. Sin ejecuciones anteriores, o sin artefacto, no hay estado.
+          nombre="diverger-bucle-$INICIATIVA"
+          ejecuciones=$(gh run list -R "$GITHUB_REPOSITORY" -w diverger-bucle.yml -b "$GITHUB_REF_NAME" -s completed \
+            -L 20 --json databaseId -q '.[].databaseId')
+          temporal=$(mktemp -d)
+          for ejecucion in $ejecuciones; do
+            if gh run download "$ejecucion" -R "$GITHUB_REPOSITORY" -n "$nombre" -D "$temporal" 2>/dev/null; then
+              jq -e 'type == "object"' "$temporal/run.json" >/dev/null || { echo "::error::run.json no es válido"; exit 1; }
+              mkdir -p ".diverger/$INICIATIVA"
+              cp "$temporal/run.json" ".diverger/$INICIATIVA/run.json"
+              break
+            fi
+          done
       - name: Bucle
         env:
           GH_TOKEN: ${{ steps.token-bucle.outputs.token }}
@@ -115,6 +134,13 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$codigo"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: diverger-bucle-${{ inputs.initiative }}
+          path: .diverger/${{ inputs.initiative }}/run.json
+          if-no-files-found: ignore
+          retention-days: 90
       # Después del bucle, que puede durar horas: el token de GCP dura una. Si el registro falla, el
       # job no falla por eso: solo se pierde la fila (ADR 0017).
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3

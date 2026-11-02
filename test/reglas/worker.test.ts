@@ -54,8 +54,8 @@ describe("forma del workflow del worker", () => {
   it("se lanza solo con workflow_dispatch y las entradas initiative, task y run", () => {
     expect(Object.keys(WF.on)).toEqual(["workflow_dispatch"]);
     const entradas = WF.on.workflow_dispatch.inputs;
-    expect(Object.keys(entradas)).toEqual(["initiative", "task", "run"]);
-    for (const entrada of Object.values(entradas)) expect(entrada).toMatchObject({ required: true, type: "string" });
+    expect(Object.keys(entradas)).toEqual(["initiative", "task", "max-usd", "run"]);
+    for (const entrada of Object.entries(entradas).filter(([nombre]) => nombre !== "max-usd").map(([, valor]) => valor)) expect(entrada).toMatchObject({ required: true, type: "string" });
   });
 
   it("el job se llama diverger-worker <task> <run>, para encontrarlo al conciliar", () => {
@@ -120,7 +120,7 @@ describe("forma del workflow del worker", () => {
 
   it("el modelo solo recibe la clave de Anthropic, ningún token de GitHub", () => {
     for (const nombre of ["Worker", "Worker, intento 2", "Worker, intento 3"]) {
-      expect(Object.keys(paso(nombre).env ?? {}).sort()).toEqual(["ANTHROPIC_API_KEY", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]);
+      expect(Object.keys(paso(nombre).env ?? {}).filter((clave) => clave !== "GASTADO").sort()).toEqual(["ANTHROPIC_API_KEY", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]);
       expect(paso(nombre).run).toMatch(/^bash "\$GITHUB_WORKSPACE\/\.github\/diverger\/worker-modelo\.sh" [123]$/);
     }
     for (const anterior of PASOS.slice(0, indice("Worker"))) {
@@ -163,9 +163,9 @@ describe("forma del workflow del worker", () => {
 
   it("tiene topes de turnos, de gasto y de tiempo por intento", () => {
     expect(MODELO_SH).toMatch(/--max-turns "\$MAX_TURNOS"/);
-    expect(MODELO_SH).toMatch(/--max-budget-usd "\$MAX_USD"/);
+    expect(MODELO_SH).toMatch(/--max-budget-usd "\$restante"/);
     expect(JOB.env.MAX_TURNOS).toBe("${{ vars.DIVERGER_WORKER_MAX_TURNS || '40' }}");
-    expect(JOB.env.MAX_USD).toBe("${{ vars.DIVERGER_WORKER_MAX_BUDGET_USD || '2.00' }}");
+    expect(JOB.env.MAX_USD).toBe("${{ inputs.max-usd || vars.DIVERGER_WORKER_MAX_BUDGET_USD || '10.00' }}");
     const pasosConTope = PASOS.filter((p) => p.name?.startsWith("Worker") || p.id?.startsWith("comprobaciones-"));
     const total = pasosConTope.reduce((suma, p) => suma + (p["timeout-minutes"] ?? Infinity), 0);
     expect(total).toBeLessThanOrEqual(3 * 35);
