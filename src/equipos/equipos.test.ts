@@ -327,3 +327,92 @@ describe("POST /api/equipos", () => {
     expect(await almacen.listar(COLECCION)).toHaveLength(0);
   });
 });
+
+describe("sesión en la API de equipos (HU-ACC-02)", () => {
+  const SIN_SESION = { error: "Inicia sesión con Google." };
+
+  async function conSesiones() {
+    const almacen = almacenEnMemoria();
+    const app = await crearServidor({
+      googleClientId: "cliente",
+      verificarToken: (token) =>
+        Promise.resolve(
+          token === "valido"
+            ? { nombre: "Ana", email: "ana@example.com" }
+            : token === "cuenta-de-servicio"
+              ? { nombre: "Inventario de IT", email: "inventario@proyecto.iam.gserviceaccount.com" }
+              : null,
+        ),
+      almacen,
+      contextos: [rutas],
+    });
+    return { almacen, app };
+  }
+
+  it("la cuenta de servicio del inventario con token válido lista los equipos", async () => {
+    const { app } = await conSesiones();
+    const respuesta = await app.inject({
+      method: "GET",
+      url: "/api/equipos",
+      headers: { authorization: "Bearer cuenta-de-servicio" },
+    });
+    expect(respuesta.statusCode).toBe(200);
+    expect(respuesta.json()).toEqual([]);
+  });
+
+  it("responde 401 con un token no válido al dar de alta y no crea el equipo", async () => {
+    const { almacen, app } = await conSesiones();
+    const respuesta = await app.inject({
+      method: "POST",
+      url: "/api/equipos",
+      headers: { authorization: "Bearer token-no-valido" },
+      payload: { nombre: "Portátil 09" },
+    });
+    expect(respuesta.statusCode).toBe(401);
+    expect(respuesta.json()).toEqual(SIN_SESION);
+    expect(await almacen.listar(COLECCION)).toHaveLength(0);
+  });
+
+  it("responde 401 con una cabecera que no es Bearer", async () => {
+    const { app } = await conSesiones();
+    const respuesta = await app.inject({
+      method: "GET",
+      url: "/api/equipos",
+      headers: { authorization: "Basic valido" },
+    });
+    expect(respuesta.statusCode).toBe(401);
+    expect(respuesta.json()).toEqual(SIN_SESION);
+  });
+
+  it("sin token no presta ni devuelve: el equipo conserva su estado", async () => {
+    const { almacen, app } = await conSesiones();
+    const cabeceras = { authorization: "Bearer valido" };
+    const equipo = (
+      await app.inject({ method: "POST", url: "/api/equipos", headers: cabeceras, payload: { nombre: "Portátil 07" } })
+    ).json<Equipo>();
+
+    const prestamo = await app.inject({
+      method: "POST",
+      url: `/api/equipos/${equipo.id}/prestamo`,
+      payload: { persona: "Ana Pérez", devolucion: "2026-11-20" },
+    });
+    expect(prestamo.statusCode).toBe(401);
+    expect(prestamo.json()).toEqual(SIN_SESION);
+    expect((await almacen.obtener<{ prestado: boolean }>(COLECCION, equipo.id))?.prestado).toBe(false);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/equipos/${equipo.id}/prestamo`,
+      headers: cabeceras,
+      payload: { persona: "Ana Pérez", devolucion: "2026-11-20" },
+    });
+    const devolucion = await app.inject({ method: "POST", url: `/api/equipos/${equipo.id}/devolucion` });
+    expect(devolucion.statusCode).toBe(401);
+    expect(devolucion.json()).toEqual(SIN_SESION);
+    expect(await almacen.obtener(COLECCION, equipo.id)).toMatchObject({
+      prestado: true,
+      persona: "Ana Pérez",
+      devolucion: "2026-11-20",
+    });
+  });
+});
