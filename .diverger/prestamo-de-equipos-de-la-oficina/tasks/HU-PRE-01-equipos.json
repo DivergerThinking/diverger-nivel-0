@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "HU-PRE-01-equipos",
+  "title": "Equipos: prestar un equipo (HU-PRE-01)",
+  "status": "pending",
+  "story": "HU-PRE-01",
+  "context": "equipos",
+  "modules": ["src/equipos"],
+  "contracts": ["spec/contextos/equipos/api.openapi.json"],
+  "dependsOn": ["HU-INV-02-equipos", "HU-INV-01-equipos"]
+}
