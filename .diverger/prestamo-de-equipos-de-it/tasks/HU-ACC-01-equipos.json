@@ -2,10 +2,14 @@
   "schemaVersion": 1,
   "id": "HU-ACC-01-equipos",
   "title": "Equipos: entrar con la cuenta de Google (HU-ACC-01)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-ACC-01",
   "context": "equipos",
-  "modules": ["src/equipos"],
-  "contracts": ["spec/contextos/equipos/api.openapi.json"],
+  "modules": [
+    "src/equipos"
+  ],
+  "contracts": [
+    "spec/contextos/equipos/api.openapi.json"
+  ],
   "dependsOn": []
 }
