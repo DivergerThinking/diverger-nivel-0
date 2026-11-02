@@ -63,6 +63,85 @@ describe("POST /api/equipos", () => {
   });
 });
 
+describe("POST /api/equipos/:id/prestamo", () => {
+  async function conPortatil(almacen = almacenEnMemoria()) {
+    const app = await servidor(almacen);
+    const { id } = (await app.inject({ method: "POST", url: "/api/equipos", headers, payload: { nombre: "Portátil 07" } })).json<{ id: string }>();
+    const prestar = (payload?: object, url = `/api/equipos/${id}/prestamo`) => app.inject({ method: "POST", url, headers, payload });
+    const equipo = async () => (await app.inject({ url: "/api/equipos", headers })).json<unknown[]>()[0];
+    return { app, id, prestar, equipo };
+  }
+
+  it("presta «Portátil 07» a Ana Pérez: 201 con persona y devolucion, y la lista lo muestra prestado", async () => {
+    const { app, id, prestar, equipo } = await conPortatil();
+    const respuesta = await prestar({ persona: "Ana Pérez", devolucion: "2026-11-20" });
+    const esperado = { id, nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" };
+    expect(respuesta.statusCode).toBe(201);
+    expect(respuesta.json()).toEqual(esperado);
+    expect(await equipo()).toEqual(esperado);
+    await app.close();
+  });
+
+  it.each([
+    { devolucion: "2026-11-20" },
+    { persona: "Ana Pérez" },
+    { persona: "  ", devolucion: "2026-11-20" },
+    { persona: "Ana Pérez", devolucion: 7 },
+    {},
+  ])("con %j responde 400 y el equipo sigue sin prestar", async (cuerpo) => {
+    const { app, id, prestar, equipo } = await conPortatil();
+    const respuesta = await prestar(cuerpo);
+    expect(respuesta.statusCode).toBe(400);
+    expect(respuesta.json()).toEqual({ error: "Faltan la persona o la fecha de devolución" });
+    expect(await equipo()).toEqual({ id, nombre: "Portátil 07", prestado: false });
+    await app.close();
+  });
+
+  it("sin cuerpo responde 400", async () => {
+    const { app, prestar } = await conPortatil();
+    const respuesta = await prestar();
+    expect(respuesta.statusCode).toBe(400);
+    expect(respuesta.json()).toEqual({ error: "Faltan la persona o la fecha de devolución" });
+    await app.close();
+  });
+
+  it("un equipo que no existe responde 404 «No existe el equipo»", async () => {
+    const { app, prestar } = await conPortatil();
+    const respuesta = await prestar({ persona: "Ana Pérez", devolucion: "2026-11-20" }, "/api/equipos/no-existe/prestamo");
+    expect(respuesta.statusCode).toBe(404);
+    expect(respuesta.json()).toEqual({ error: "No existe el equipo" });
+    await app.close();
+  });
+
+  it("un equipo ya prestado responde 409 y sigue prestado a la primera persona", async () => {
+    const { app, id, prestar, equipo } = await conPortatil();
+    await prestar({ persona: "Ana Pérez", devolucion: "2026-11-20" });
+    const respuesta = await prestar({ persona: "Luis Gómez", devolucion: "2026-11-27" });
+    expect(respuesta.statusCode).toBe(409);
+    expect(respuesta.json()).toEqual({ error: "El equipo ya está prestado" });
+    expect(await equipo()).toEqual({ id, nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" });
+    await app.close();
+  });
+
+  it("dos préstamos a la vez prestan el equipo una sola vez", async () => {
+    const { app, prestar } = await conPortatil();
+    const respuestas = await Promise.all([
+      prestar({ persona: "Ana Pérez", devolucion: "2026-11-20" }),
+      prestar({ persona: "Luis Gómez", devolucion: "2026-11-27" }),
+    ]);
+    expect(respuestas.map((r) => r.statusCode).sort()).toEqual([201, 409]);
+    await app.close();
+  });
+
+  it("sin token responde 401 y no presta el equipo", async () => {
+    const { app, id, equipo } = await conPortatil();
+    const respuesta = await app.inject({ method: "POST", url: `/api/equipos/${id}/prestamo`, payload: { persona: "Ana Pérez", devolucion: "2026-11-20" } });
+    expect(respuesta.statusCode).toBe(401);
+    expect(await equipo()).toEqual({ id, nombre: "Portátil 07", prestado: false });
+    await app.close();
+  });
+});
+
 describe("GET /api/equipos", () => {
   it("con sesión iniciada devuelve 200 y la lista vacía si no hay equipos", async () => {
     const app = await servidor();

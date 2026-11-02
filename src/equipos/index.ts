@@ -2,7 +2,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { OpcionesContexto } from "../../lib/datos.js";
 import "../../lib/auth.js";
-import { crearEquipo, listarEquipos } from "./equipos.js";
+import { crearEquipo, listarEquipos, prestarEquipo } from "./equipos.js";
 
 export { type Equipo } from "./equipos.js";
 
@@ -16,6 +16,15 @@ export const rutas: FastifyPluginAsync<OpcionesContexto> = (app, { almacen }) =>
     if ("equipo" in resultado) return reply.code(201).send(resultado.equipo);
     if (resultado.error === "FALTA_NOMBRE") return reply.code(400).send({ error: "Falta el nombre del equipo" });
     return reply.code(409).send({ error: "Ya hay un equipo con ese nombre" });
+  });
+  app.post<{ Params: { id: string } }>("/api/equipos/:id/prestamo", async (request, reply) => {
+    const cuerpo = request.body;
+    const datos = typeof cuerpo === "object" && cuerpo !== null ? (cuerpo as { persona?: unknown; devolucion?: unknown }) : {};
+    const resultado = await prestarEquipo(almacen, request.params.id, datos.persona, datos.devolucion);
+    if ("equipo" in resultado) return reply.code(201).send(resultado.equipo);
+    if (resultado.error === "NO_EXISTE") return reply.code(404).send({ error: "No existe el equipo" });
+    if (resultado.error === "FALTAN_DATOS") return reply.code(400).send({ error: "Faltan la persona o la fecha de devolución" });
+    return reply.code(409).send({ error: "El equipo ya está prestado" });
   });
   return Promise.resolve();
 };

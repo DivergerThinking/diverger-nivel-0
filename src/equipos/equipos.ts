@@ -55,6 +55,29 @@ export async function crearEquipo(almacen: Almacen, nombre: unknown): Promise<Re
   });
 }
 
+/** Resultado de apuntar un préstamo: el equipo prestado o el motivo por el que no se presta. */
+export type ResultadoPrestamo = { equipo: Equipo } | { error: "NO_EXISTE" | "FALTAN_DATOS" | "YA_PRESTADO" };
+
+/** Presta un equipo libre a una persona hasta la fecha de devolución, que se guarda tal como llega. */
+export async function prestarEquipo(
+  almacen: Almacen,
+  id: string,
+  persona: unknown,
+  devolucion: unknown,
+): Promise<ResultadoPrestamo> {
+  return almacen.transaccion<ResultadoPrestamo>(async (tx) => {
+    const documento = await tx.obtener<DocumentoEquipo>(COLECCION_EQUIPOS, id);
+    if (documento === undefined) return { error: "NO_EXISTE" };
+    if (typeof persona !== "string" || persona.trim() === "" || typeof devolucion !== "string" || devolucion.trim() === "") {
+      return { error: "FALTAN_DATOS" };
+    }
+    if (documento.prestado) return { error: "YA_PRESTADO" };
+    const prestado: DocumentoEquipo = { ...documento, prestado: true, persona: persona.trim(), devolucion };
+    tx.guardar(COLECCION_EQUIPOS, id, prestado);
+    return { equipo: aEquipo(prestado) };
+  });
+}
+
 export async function listarEquipos(almacen: Almacen): Promise<Equipo[]> {
   const documentos = await almacen.listar<DocumentoEquipo>(COLECCION_EQUIPOS);
   return documentos.map(aEquipo);
