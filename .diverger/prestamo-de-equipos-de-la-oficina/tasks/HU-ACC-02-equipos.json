@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "HU-ACC-02-equipos",
+  "title": "Equipos: rechazar llamadas a la API sin sesión (HU-ACC-02)",
+  "status": "pending",
+  "story": "HU-ACC-02",
+  "context": "equipos",
+  "modules": ["src/equipos"],
+  "contracts": ["spec/contextos/equipos/api.openapi.json"],
+  "dependsOn": ["HU-ACC-01-equipos"]
+}

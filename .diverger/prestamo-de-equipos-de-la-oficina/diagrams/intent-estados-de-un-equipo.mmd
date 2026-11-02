@@ -1,0 +1,6 @@
+stateDiagram-v2
+    state "No prestado" as NoPrestado
+    state "Prestado" as Prestado
+    [*] --> NoPrestado: Dar de alta
+    NoPrestado --> Prestado: Prestar a una persona hasta una fecha
+    Prestado --> NoPrestado: Apuntar la devolución
