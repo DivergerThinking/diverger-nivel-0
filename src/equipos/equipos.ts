@@ -28,6 +28,50 @@ export type ResultadoAlta =
   | { ok: true; equipo: Equipo }
   | { ok: false; error: string; repetido?: boolean };
 
+export const ERROR_FALTAN_DATOS_PRESTAMO = "Faltan la persona o la fecha de devolución";
+export const ERROR_FECHA_NO_VALIDA = "La fecha de devolución no es válida";
+export const ERROR_YA_PRESTADO = "El equipo ya está prestado";
+export const ERROR_NO_EXISTE = "No existe el equipo";
+
+export type ResultadoPrestamo =
+  | { ok: true; equipo: Equipo }
+  | { ok: false; error: string; codigo: 400 | 404 | 409 };
+
+/** True si el texto es AAAA-MM-DD y una fecha real del calendario. */
+export function esFechaReal(texto: string): boolean {
+  const partes = /^(\d{4})-(\d{2})-(\d{2})$/.exec(texto);
+  if (!partes) return false;
+  const [anio, mes, dia] = [Number(partes[1]), Number(partes[2]), Number(partes[3])];
+  const fecha = new Date(Date.UTC(anio, mes - 1, dia));
+  return fecha.getUTCFullYear() === anio && fecha.getUTCMonth() === mes - 1 && fecha.getUTCDate() === dia;
+}
+
+/** Presta un equipo no prestado a una persona hasta la fecha de devolución (las fechas pasadas se aceptan). */
+export async function prestarEquipo(
+  almacen: Almacen,
+  id: string,
+  persona: unknown,
+  devolucion: unknown,
+): Promise<ResultadoPrestamo> {
+  if (
+    typeof persona !== "string" ||
+    persona.trim() === "" ||
+    typeof devolucion !== "string" ||
+    devolucion.trim() === ""
+  ) {
+    return { ok: false, codigo: 400, error: ERROR_FALTAN_DATOS_PRESTAMO };
+  }
+  if (!esFechaReal(devolucion)) return { ok: false, codigo: 400, error: ERROR_FECHA_NO_VALIDA };
+  // Se lee y se escribe en la misma transacción: dos préstamos a la vez del mismo equipo no se pisan.
+  return almacen.transaccion<ResultadoPrestamo>(async (tx) => {
+    const equipo = await tx.obtener<DocumentoEquipo>(COLECCION, id);
+    if (!equipo) return { ok: false, codigo: 404, error: ERROR_NO_EXISTE };
+    if (equipo.prestado) return { ok: false, codigo: 409, error: ERROR_YA_PRESTADO };
+    tx.guardar(COLECCION, id, { ...equipo, prestado: true, persona, devolucion });
+    return { ok: true, equipo: { id, nombre: equipo.nombre, prestado: true, persona, devolucion } };
+  });
+}
+
 export function normalizarNombre(nombre: string): string {
   return nombre.trim().toLowerCase();
 }

@@ -2,12 +2,13 @@
 import type { FastifyPluginAsync } from "fastify";
 import "../../lib/auth.js";
 import type { OpcionesContexto } from "../../lib/datos.js";
-import { darDeAlta } from "./equipos.js";
+import { darDeAlta, prestarEquipo } from "./equipos.js";
 import type { components } from "./api.gen.js";
 
 export { darDeAlta, type Equipo } from "./equipos.js";
 
 type NuevoEquipo = components["schemas"]["NuevoEquipo"];
+type NuevoPrestamo = components["schemas"]["NuevoPrestamo"];
 
 /** Rutas del contrato spec/contextos/equipos/api.openapi.json. */
 export const rutas: FastifyPluginAsync<OpcionesContexto> = (app, { almacen }) => {
@@ -16,5 +17,18 @@ export const rutas: FastifyPluginAsync<OpcionesContexto> = (app, { almacen }) =>
     if (!resultado.ok) return reply.code(resultado.repetido ? 409 : 400).send({ error: resultado.error });
     return reply.code(201).send(resultado.equipo);
   });
+  app.post<{ Params: { id: string }; Body: NuevoPrestamo | null }>(
+    "/api/equipos/:id/prestamo",
+    async (request, reply) => {
+      const resultado = await prestarEquipo(
+        almacen,
+        request.params.id,
+        request.body?.persona,
+        request.body?.devolucion,
+      );
+      if (!resultado.ok) return reply.code(resultado.codigo).send({ error: resultado.error });
+      return reply.code(201).send(resultado.equipo);
+    },
+  );
   return Promise.resolve();
 };
