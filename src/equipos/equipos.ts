@@ -99,6 +99,37 @@ export function normalizarNombre(nombre: string): string {
   return nombre.trim().toLowerCase();
 }
 
+function idReservaNombre(nombreNormalizado: string): string {
+  return `n:${encodeURIComponent(nombreNormalizado)}`;
+}
+
+/** Lista los equipos por nombre; solo los prestados llevan persona y devolucion. */
+export async function listarEquipos(almacen: Almacen): Promise<Equipo[]> {
+  const documentos = await almacen.listar<DocumentoEquipo>(COLECCION);
+  // Los documentos no guardan su id: se recupera de la reserva de su nombre, que apunta al equipo.
+  const equipos = await Promise.all(
+    documentos.map(async (documento): Promise<Equipo | null> => {
+      const reserva = await almacen.obtener<{ equipoId: string }>(
+        COLECCION_NOMBRES,
+        idReservaNombre(documento.nombreNormalizado),
+      );
+      if (!reserva) return null;
+      const id = reserva.equipoId;
+      if (!documento.prestado) return { id, nombre: documento.nombre, prestado: false };
+      return {
+        id,
+        nombre: documento.nombre,
+        prestado: true,
+        ...(documento.persona === undefined ? {} : { persona: documento.persona }),
+        ...(documento.devolucion === undefined ? {} : { devolucion: documento.devolucion }),
+      };
+    }),
+  );
+  return equipos
+    .filter((equipo): equipo is Equipo => equipo !== null)
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, "es"));
+}
+
 /** Da de alta un equipo no prestado; sin nombre (o vacío) no crea nada. */
 export async function darDeAlta(almacen: Almacen, nombre: unknown): Promise<ResultadoAlta> {
   if (typeof nombre !== "string" || normalizarNombre(nombre) === "") {
@@ -110,7 +141,7 @@ export async function darDeAlta(almacen: Almacen, nombre: unknown): Promise<Resu
   // El nombre normalizado se reserva dentro de la misma transacción que crea el equipo: dos altas
   // simultáneas con el mismo nombre no pueden crear los dos.
   const reservado = await almacen.transaccion(async (tx) => {
-    const idReserva = `n:${encodeURIComponent(nombreNormalizado)}`;
+    const idReserva = idReservaNombre(nombreNormalizado);
     if (await tx.obtener(COLECCION_NOMBRES, idReserva)) return false;
     tx.guardar(COLECCION_NOMBRES, idReserva, { equipoId: id });
     tx.guardar(COLECCION, id, documento);

@@ -2,7 +2,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import "../../lib/auth.js";
 import type { OpcionesContexto } from "../../lib/datos.js";
-import { darDeAlta, devolverEquipo, prestarEquipo } from "./equipos.js";
+import { darDeAlta, devolverEquipo, listarEquipos, prestarEquipo } from "./equipos.js";
 import type { components } from "./api.gen.js";
 
 export { darDeAlta, type Equipo } from "./equipos.js";
@@ -17,6 +17,7 @@ export const rutas: FastifyPluginAsync<OpcionesContexto> = (app, { almacen }) =>
     if (!resultado.ok) return reply.code(resultado.repetido ? 409 : 400).send({ error: resultado.error });
     return reply.code(201).send(resultado.equipo);
   });
+  app.get("/api/equipos", async (_request, reply) => reply.code(200).send(await listarEquipos(almacen)));
   app.post<{ Params: { id: string }; Body: NuevoPrestamo | null }>(
     "/api/equipos/:id/prestamo",
     async (request, reply) => {
