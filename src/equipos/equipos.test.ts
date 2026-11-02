@@ -23,6 +23,58 @@ async function preparar() {
   return { almacen, app, enviar };
 }
 
+describe("GET /api/equipos", () => {
+  async function conEquipos() {
+    const { app, enviar } = await preparar();
+    const cabeceras = { authorization: "Bearer valido" };
+    const portatil = (await enviar({ nombre: "Portátil 07" })).json<Equipo>();
+    const proyector = (await enviar({ nombre: "Proyector sala 2" })).json<Equipo>();
+    const prestar = (id: string) =>
+      app.inject({
+        method: "POST",
+        url: `/api/equipos/${id}/prestamo`,
+        headers: cabeceras,
+        payload: { persona: "Ana Pérez", devolucion: "2026-11-20" },
+      });
+    const listar = () => app.inject({ method: "GET", url: "/api/equipos", headers: cabeceras });
+    return { app, portatil, proyector, prestar, listar, cabeceras };
+  }
+
+  it("lista los equipos; el prestado lleva persona y devolucion y el libre solo id, nombre y prestado", async () => {
+    const { portatil, proyector, prestar, listar } = await conEquipos();
+    await prestar(portatil.id);
+    const respuesta = await listar();
+    expect(respuesta.statusCode).toBe(200);
+    expect(respuesta.json()).toEqual([
+      { id: portatil.id, nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" },
+      { id: proyector.id, nombre: "Proyector sala 2", prestado: false },
+    ]);
+  });
+
+  it("un equipo devuelto aparece no prestado y sin el préstamo anterior", async () => {
+    const { app, portatil, prestar, listar, cabeceras } = await conEquipos();
+    await prestar(portatil.id);
+    await app.inject({ method: "POST", url: `/api/equipos/${portatil.id}/devolucion`, headers: cabeceras });
+    const equipos = (await listar()).json<Equipo[]>();
+    const devuelto = equipos.find((e) => e.id === portatil.id);
+    expect(devuelto).toEqual({ id: portatil.id, nombre: "Portátil 07", prestado: false });
+  });
+
+  it("responde 200 con una lista vacía si no hay equipos", async () => {
+    const { app } = await preparar();
+    const respuesta = await app.inject({ method: "GET", url: "/api/equipos", headers: { authorization: "Bearer valido" } });
+    expect(respuesta.statusCode).toBe(200);
+    expect(respuesta.json()).toEqual([]);
+  });
+
+  it("responde 401 sin token", async () => {
+    const { app } = await conEquipos();
+    const respuesta = await app.inject({ method: "GET", url: "/api/equipos" });
+    expect(respuesta.statusCode).toBe(401);
+    expect(respuesta.json()).toEqual({ error: "Inicia sesión con Google." });
+  });
+});
+
 describe("POST /api/equipos/{id}/prestamo", () => {
   async function conEquipo() {
     const { almacen, app, enviar } = await preparar();
