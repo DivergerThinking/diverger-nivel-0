@@ -11,6 +11,58 @@ async function servidor(almacen = almacenEnMemoria()) {
   return crearServidor({ googleClientId: "cliente", verificarToken, almacen, contextos: [rutas] });
 }
 
+describe("POST /api/equipos", () => {
+  const alta = (app: Awaited<ReturnType<typeof servidor>>, payload?: unknown) =>
+    app.inject({ method: "POST", url: "/api/equipos", headers, payload: payload as object | undefined });
+
+  it("da de alta «Portátil 07»: 201 con id, nombre y prestado false, y aparece en la lista", async () => {
+    const app = await servidor();
+    const respuesta = await alta(app, { nombre: "Portátil 07" });
+    expect(respuesta.statusCode).toBe(201);
+    const equipo = respuesta.json<{ id: string }>();
+    expect(equipo).toEqual({ id: expect.any(String) as string, nombre: "Portátil 07", prestado: false });
+    const lista = (await app.inject({ url: "/api/equipos", headers })).json<unknown[]>();
+    expect(lista).toEqual([equipo]);
+    await app.close();
+  });
+
+  it.each([{ nombre: "" }, { nombre: "   " }, {}, { nombre: 7 }])("con %j responde 400 y no crea ningún equipo", async (cuerpo) => {
+    const almacen = almacenEnMemoria();
+    const app = await servidor(almacen);
+    const respuesta = await alta(app, cuerpo);
+    expect(respuesta.statusCode).toBe(400);
+    expect(respuesta.json()).toEqual({ error: "Falta el nombre del equipo" });
+    expect(await almacen.listar("equipos_equipos")).toEqual([]);
+    await app.close();
+  });
+
+  it("sin cuerpo responde 400 «Falta el nombre del equipo»", async () => {
+    const app = await servidor();
+    const respuesta = await alta(app);
+    expect(respuesta.statusCode).toBe(400);
+    expect(respuesta.json()).toEqual({ error: "Falta el nombre del equipo" });
+    await app.close();
+  });
+
+  it("un nombre repetido sin distinguir mayúsculas ni espacios responde 409 y deja un solo equipo", async () => {
+    const app = await servidor();
+    await alta(app, { nombre: "Portátil 07" });
+    const respuesta = await alta(app, { nombre: " portátil 07 " });
+    expect(respuesta.statusCode).toBe(409);
+    expect(respuesta.json()).toEqual({ error: "Ya hay un equipo con ese nombre" });
+    const lista = (await app.inject({ url: "/api/equipos", headers })).json<{ nombre: string }[]>();
+    expect(lista.map((e) => e.nombre)).toEqual(["Portátil 07"]);
+    await app.close();
+  });
+
+  it("dos altas a la vez con el mismo nombre crean un solo equipo", async () => {
+    const app = await servidor();
+    const respuestas = await Promise.all([alta(app, { nombre: "Proyector" }), alta(app, { nombre: "proyector " })]);
+    expect(respuestas.map((r) => r.statusCode).sort()).toEqual([201, 409]);
+    await app.close();
+  });
+});
+
 describe("GET /api/equipos", () => {
   it("con sesión iniciada devuelve 200 y la lista vacía si no hay equipos", async () => {
     const app = await servidor();
