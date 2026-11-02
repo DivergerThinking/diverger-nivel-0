@@ -28,6 +28,16 @@ intento="${1:?Falta el número de intento}"
 unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL GOOGLE_APPLICATION_CREDENTIALS \
   CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE GOOGLE_GHA_CREDS_PATH
 
+# El tope es del job, no de cada intento (ADR 0024): --max-budget-usd no cuenta lo gastado antes de reanudar, así
+# que cada intento recibe lo que queda. Una sesión reanudada ya incluye el gasto anterior: vale el mayor, no la suma.
+gastado=0
+if ls "$RUNNER_TEMP"/salida-[0-9].json >/dev/null 2>&1; then
+  gastado=$(jq -s 'map(.total_cost_usd // 0) | max' "$RUNNER_TEMP"/salida-[0-9].json)
+fi
+restante=$(awk -v tope="$MAX_USD" -v gastado="$gastado" 'BEGIN { printf "%.2f", tope - gastado }')
+awk -v restante="$restante" 'BEGIN { exit !(restante >= 0.5) }' \
+  || fallar "El worker ha gastado $gastado USD de su tope de $MAX_USD USD: no queda margen para otro intento"
+
 if [ "$intento" = 1 ]; then
   instrucciones="Usa la skill diverger-dev:implement para construir la tarea $TAREA de la iniciativa $INICIATIVA."
   sesion=()
@@ -51,7 +61,7 @@ claude -p "$instrucciones" "${sesion[@]}" \
     "Edit(./src/**)" "Write(./src/**)" "Edit(./web/**)" "Write(./web/**)" \
     "Edit(./app/contextos.ts)" "Write(./app/contextos.ts)" \
   --setting-sources user --strict-mcp-config \
-  --max-turns "$MAX_TURNOS" --max-budget-usd "$MAX_USD" \
+  --max-turns "$MAX_TURNOS" --max-budget-usd "$restante" \
   --output-format json > "$RUNNER_TEMP/salida-$intento.json"
 codigo=$?
 set -e
