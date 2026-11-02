@@ -99,23 +99,10 @@ jobs:
           permission-pull-requests: read
       # El gasto vive en run.json, que no se versiona: sin esto, relanzar en un job nuevo lo pondría a cero (ADR 0024).
       - name: Recuperar el estado anterior
+        id: estado
         env:
           GH_TOKEN: ${{ steps.token-bucle.outputs.token }}
-        run: |
-          # Solo ejecuciones de este workflow en la rama base, y solo run.json. Si GitHub no responde, el job falla:
-          # seguir sin el estado pondría el gasto a cero. Sin ejecuciones anteriores, o sin artefacto, no hay estado.
-          nombre="diverger-bucle-$INICIATIVA"
-          ejecuciones=$(gh run list -R "$GITHUB_REPOSITORY" -w diverger-bucle.yml -b "$GITHUB_REF_NAME" -s completed \
-            -L 20 --json databaseId -q '.[].databaseId')
-          temporal=$(mktemp -d)
-          for ejecucion in $ejecuciones; do
-            if gh run download "$ejecucion" -R "$GITHUB_REPOSITORY" -n "$nombre" -D "$temporal" 2>/dev/null; then
-              jq -e 'type == "object"' "$temporal/run.json" >/dev/null || { echo "::error::run.json no es válido"; exit 1; }
-              mkdir -p ".diverger/$INICIATIVA"
-              cp "$temporal/run.json" ".diverger/$INICIATIVA/run.json"
-              break
-            fi
-          done
+        run: bash .github/diverger/bucle-estado.sh
       - name: Bucle
         env:
           GH_TOKEN: ${{ steps.token-bucle.outputs.token }}
@@ -134,11 +121,14 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$codigo"
+      # Solo si se recuperó el estado: si no, un run.json nuevo taparía el bueno (harness#498). overwrite, porque un
+      # «Re-run» sube otra vez con el mismo nombre en la misma ejecución.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
+        if: always() && steps.estado.outcome == 'success'
         with:
           name: diverger-bucle-${{ inputs.initiative }}
           path: .diverger/${{ inputs.initiative }}/run.json
+          overwrite: true
           if-no-files-found: ignore
           retention-days: 90
       # Después del bucle, que puede durar horas: el token de GCP dura una. Si el registro falla, el

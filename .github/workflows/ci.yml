@@ -52,17 +52,31 @@ jobs:
       - name: Dependencias con vulnerabilidades conocidas (SCA)
         run: npm audit --audit-level=high
 
-  # Cada commit de un agente lleva los trailers de rol, modelo y tarea (scripts/git-hooks).
+  # Cada commit de un agente lleva los trailers de rol, modelo y tarea (scripts/git-hooks), y cada
+  # commit del harness dice qué persona lo lanzó, la misma que lanzó su ejecución (EN-OPS-06).
   trailers:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # Para saber quién lanzó la ejecución del worker que abrió la PR.
     steps:
+      # La comprobación es la de la rama base: una PR no puede cambiar el script que la juzga.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
+      - name: Commits de la PR
+        env:
+          NUMERO: ${{ github.event.pull_request.number }}
+        run: git fetch --quiet origin "refs/pull/$NUMERO/head"
       - name: Trailers de autoría
         env:
           RANGO: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_CUERPO: ${{ github.event.pull_request.body }}
+          PR_RAMA: ${{ github.head_ref }}
+          PR_BASE: ${{ github.base_ref }}
         run: node scripts/trailers.mjs "$RANGO"
 
   # Solo en la plantilla: un repositorio creado desde ella recibe los ficheros de este commit y
