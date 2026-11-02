@@ -28,6 +28,15 @@ intento="${1:?Falta el número de intento}"
 unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL GOOGLE_APPLICATION_CREDENTIALS \
   CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE GOOGLE_GHA_CREDS_PATH
 
+# El tope es del job, no de cada intento (ADR 0024): --max-budget-usd no cuenta lo gastado antes de reanudar, así
+# que cada intento recibe lo que queda. GASTADO llega de la salida del paso anterior, que el código de las
+# comprobaciones no puede cambiar. Una sesión reanudada ya incluye el gasto anterior: es un total, no se suma.
+tope="${TOPE_JOB:-$MAX_USD}"
+gastado="${GASTADO:-0}"
+restante=$(awk -v tope="$tope" -v gastado="$gastado" 'BEGIN { printf "%.2f", tope - gastado }')
+awk -v restante="$restante" 'BEGIN { exit !(restante >= 0.5) }' \
+  || fallar "El worker ha gastado $gastado USD de su tope de $tope USD: no queda margen para otro intento"
+
 if [ "$intento" = 1 ]; then
   instrucciones="Usa la skill diverger-dev:implement para construir la tarea $TAREA de la iniciativa $INICIATIVA."
   sesion=()
@@ -51,11 +60,16 @@ claude -p "$instrucciones" "${sesion[@]}" \
     "Edit(./src/**)" "Write(./src/**)" "Edit(./web/**)" "Write(./web/**)" \
     "Edit(./app/contextos.ts)" "Write(./app/contextos.ts)" \
   --setting-sources user --strict-mcp-config \
-  --max-turns "$MAX_TURNOS" --max-budget-usd "$MAX_USD" \
+  --max-turns "$MAX_TURNOS" --max-budget-usd "$restante" \
   --output-format json > "$RUNNER_TEMP/salida-$intento.json"
 codigo=$?
 set -e
 cp "$RUNNER_TEMP/salida-$intento.json" "$RUNNER_TEMP/salida.json"
+# Antes de cualquier fallo del intento: error_max_budget_usd también trae su coste, y una sesión caída lo deja a cero.
+coste=$(jq -r '.total_cost_usd // 0' "$RUNNER_TEMP/salida-$intento.json" 2>/dev/null || echo 0)
+if [ -n "${GITHUB_OUTPUT:-}" ] && awk -v c="$coste" 'BEGIN { exit !(c > 0) }'; then
+  echo "coste=$coste" >> "$GITHUB_OUTPUT"
+fi
 jq '{is_error, subtype, num_turns, total_cost_usd, result}' "$RUNNER_TEMP/salida-$intento.json" || true
 echo "Herramientas denegadas:"
 jq -r '.permission_denials[]? | "- \(.tool_name): \(.tool_input | tostring | .[0:200])"' "$RUNNER_TEMP/salida-$intento.json" || true

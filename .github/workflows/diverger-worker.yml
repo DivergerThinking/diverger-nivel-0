@@ -33,6 +33,10 @@ on:
         description: Tarea (fichero de .diverger/<iniciativa>/tasks/)
         required: true
         type: string
+      max-usd:
+        description: Tope de gasto del job en USD; lo fija el bucle desde budget.maxWorkerUsd
+        required: false
+        type: string
       run:
         description: Identificador de la ejecución del bucle
         required: true
@@ -61,9 +65,10 @@ jobs:
       # variable del repositorio y, si tampoco, el valor por defecto (RQ.040).
       MODELO_VARIABLE: ${{ vars.DIVERGER_WORKER_MODEL || '' }}
       MODELO_POR_DEFECTO: claude-sonnet-5-5
-      # Topes de cada intento del modelo, de las variables del repositorio.
+      # Topes: los turnos son de cada intento y el gasto, del job entero (ADR 0024). Manda el que pasa el bucle,
+      # que sale de budget.maxWorkerUsd de .diverger/settings.json.
       MAX_TURNOS: ${{ vars.DIVERGER_WORKER_MAX_TURNS || '40' }}
-      MAX_USD: ${{ vars.DIVERGER_WORKER_MAX_BUDGET_USD || '2.00' }}
+      MAX_USD: ${{ inputs.max-usd || vars.DIVERGER_WORKER_MAX_BUDGET_USD || '10.00' }}
       # Rama del harness de la que se descarga el plugin diverger-dev.
       HARNESS_REF: ${{ vars.DIVERGER_HARNESS_REF || 'main' }}
       # Telemetría: solo si el repositorio tiene las dos variables.
@@ -183,7 +188,13 @@ jobs:
       # Tres intentos como mucho. En cada uno, el modelo trabaja (worker-modelo.sh) y después el job
       # ejecuta las comprobaciones en otro paso, sin la clave de Anthropic (worker-comprobar.sh). Los
       # scripts salen del checkout de la rama base, no del worktree que cambia el modelo.
+      # max-usd solo puede bajar el tope: el techo es budget.maxWorkerUsd de la rama base, que protege CODEOWNERS.
+      - name: Tope del job
+        run: |
+          techo=$(jq -r '.budget.maxWorkerUsd // 10' .diverger/settings.json 2>/dev/null || echo 10)
+          awk -v tope="$MAX_USD" -v techo="$techo" 'BEGIN { printf "TOPE_JOB=%.2f\n", (tope + 0 < techo + 0 ? tope : techo) }' >> "$GITHUB_ENV"
       - name: Worker
+        id: worker-1
         timeout-minutes: 20
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -197,9 +208,11 @@ jobs:
         run: bash .github/diverger/worker-comprobar.sh 1
 
       - name: Worker, intento 2
+        id: worker-2
         if: steps.comprobaciones-1.outcome == 'failure'
         timeout-minutes: 20
         env:
+          GASTADO: ${{ steps.worker-1.outputs.coste }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
         working-directory: ${{ env.WORKTREE }}
@@ -212,9 +225,11 @@ jobs:
         run: bash .github/diverger/worker-comprobar.sh 2
 
       - name: Worker, intento 3
+        id: worker-3
         if: steps.comprobaciones-2.outcome == 'failure'
         timeout-minutes: 20
         env:
+          GASTADO: ${{ steps.worker-2.outputs.coste || steps.worker-1.outputs.coste }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
         working-directory: ${{ env.WORKTREE }}
@@ -302,7 +317,7 @@ jobs:
             echo "Lanzado por @$LANZADO_POR. Job del worker: $GITHUB_SERVER_URL/$repo/actions/runs/$GITHUB_RUN_ID"
             echo
             jq -rs --arg modelo "$MODELO" \
-              '"Coste del worker: \(map(.total_cost_usd // 0) | add) USD en \(map(.num_turns // 0) | add) turnos y \(length) intentos (modelo `\($modelo)`). Comprobaciones (npm run check) en verde."' \
+              '"Coste del worker: \(map(.total_cost_usd // 0) | max) USD en \(map(.num_turns // 0) | add) turnos y \(length) intentos (modelo `\($modelo)`). Comprobaciones (npm run check) en verde."' \
               "$RUNNER_TEMP"/salida-*.json
           } > "$RUNNER_TEMP/pr.md"
           url=$(gh pr create -R "$repo" --base "$GITHUB_REF_NAME" --head "$RAMA" \
@@ -320,6 +335,24 @@ jobs:
             echo "manual" > "$RUNNER_TEMP/integracion"
             echo "::warning::No se ha podido activar el auto-merge (¿«Allow auto-merge» desactivado?): alguien tiene que integrar $url"
           fi
+
+      # El coste para el bucle: también si el job falla o se cancela. Sin artefacto, cuenta el tope entero. Sale de
+      # las salidas de los pasos del modelo, que el código de las comprobaciones no puede cambiar.
+      - name: Coste del job
+        if: always()
+        env:
+          INTENTOS: >-
+            ${{ steps.worker-1.outcome }}:${{ steps.worker-1.outputs.coste }}
+            ${{ steps.worker-2.outcome }}:${{ steps.worker-2.outputs.coste }}
+            ${{ steps.worker-3.outcome }}:${{ steps.worker-3.outputs.coste }}
+        run: bash .github/diverger/worker-coste.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: diverger-coste
+          path: ${{ runner.temp }}/coste/coste.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       # Parar el Collector con margen manda lo que tenga pendiente. Corre siempre, también si el job
       # falla o se salta la telemetría (entonces no hay Collector y no hace nada).
@@ -360,7 +393,7 @@ jobs:
               echo "**Resultado:** sin PR. El job se canceló, superó su tiempo máximo o falló un paso sin motivo propio; mira su log."
             fi
             if ls "$RUNNER_TEMP"/salida-*.json >/dev/null 2>&1; then
-              jq -rs '"", "Coste: \(map(.total_cost_usd // 0) | add) USD, \(map(.num_turns // 0) | add) turnos en \(length) intentos, final: \(.[-1].subtype)."' "$RUNNER_TEMP"/salida-*.json
+              jq -rs '"", "Coste: \(map(.total_cost_usd // 0) | max) USD, \(map(.num_turns // 0) | add) turnos en \(length) intentos, final: \(.[-1].subtype)."' "$RUNNER_TEMP"/salida-*.json
               jq -rs '"", "Herramientas denegadas: \(map(.permission_denials // [] | length) | add)", (.[].permission_denials[]? | "- \(.tool_name)")' "$RUNNER_TEMP"/salida-*.json
             fi
             if [ -s "$RUNNER_TEMP/comprobaciones" ]; then
