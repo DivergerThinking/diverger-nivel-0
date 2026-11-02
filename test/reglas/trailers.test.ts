@@ -15,6 +15,9 @@ import { arrancar, lanzadoPorElBucle, PERSONAS, REPO, type Datos } from "./githu
 const RAIZ = join(import.meta.dirname, "..", "..");
 const SCRIPT = join(RAIZ, "scripts", "trailers.mjs");
 const HOOKS = join(RAIZ, "scripts", "git-hooks");
+// Las comprobaciones del worker corren en un contenedor sin git (harness#533): ahí estas pruebas se saltan, y
+// el CI de la PR las ejecuta en el runner, que sí lo tiene.
+const HAY_GIT = spawnSync("git", ["--version"]).status === 0;
 const AGENTE = { DIVERGER_ROL: "Desarrollador", DIVERGER_MODELO: "claude-sonnet-5-5", DIVERGER_TAREA: "TA-004" };
 
 let repo = "";
@@ -36,6 +39,7 @@ function comprobar(): { codigo: number | null; errores: string } {
 }
 
 beforeEach(() => {
+  if (!HAY_GIT) return;
   repo = mkdtempSync(join(tmpdir(), "trailers-"));
   git(["init", "-q", "-b", "main"]);
   git(["config", "user.name", "Prueba"]);
@@ -48,12 +52,12 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(repo, { recursive: true, force: true });
+  if (repo) rmSync(repo, { recursive: true, force: true });
   servidor?.close();
   servidor = undefined;
 });
 
-describe("trailers de autoría", () => {
+describe.skipIf(!HAY_GIT)("trailers de autoría", () => {
   it("el hook añade rol, modelo y tarea al commit del worker y el CI lo acepta", () => {
     commit("feat: préstamo de equipos", AGENTE);
     const mensaje = git(["log", "-1", "--format=%B"]);
@@ -125,7 +129,7 @@ async function comprobarPR(datos: Datos, cuerpo = CUERPO, rama = RAMA, base = "m
   }
 }
 
-describe("trailer de quien lanzó el harness (EN-OPS-06)", () => {
+describe.skipIf(!HAY_GIT)("trailer de quien lanzó el harness (EN-OPS-06)", () => {
   const LANZADO_POR_JOSELCS = { ejecuciones: lanzadoPorElBucle("joselcs"), usuarios: PERSONAS };
 
   it("un commit del harness lanzado por joselcs lleva su trailer y su Co-authored-by noreply, y el CI lo acepta", async () => {

@@ -224,6 +224,19 @@ describe("forma del workflow del worker", () => {
     expect([...orden.matchAll(/-e ([A-Za-z_]+)=/g)].map((m) => m[1])).toEqual(["HOME", "CI", "npm_config_cache", "npm_config_update_notifier"]);
   });
 
+  it("el CI ejecuta las comprobaciones en el contenedor del worker, con su imagen y su script (harness#533)", () => {
+    const ci = parse(readFileSync(join(RAIZ, ".github", "workflows", "ci.yml"), "utf8")) as {
+      jobs: Record<string, { steps: { run?: string }[] }>;
+    };
+    const run = (ci.jobs.contenedor?.steps ?? []).map((p) => p.run ?? "").join("\n");
+    expect(run).toContain("s/^ *IMAGEN_COMPROBACIONES: *//p' .github/workflows/diverger-worker.yml");
+    expect(run).toContain('git worktree add --quiet --detach "$RUNNER_TEMP/worktree" HEAD');
+    expect(run).toContain("bash .github/diverger/worker-comprobar.sh 1");
+    // La expresión del CI saca justo la imagen del worker.
+    const imagen = TEXTO.split("\n").map((l) => /^ *IMAGEN_COMPROBACIONES: *(.*)$/.exec(l)?.[1]).filter(Boolean);
+    expect(imagen).toEqual([JOB.env.IMAGEN_COMPROBACIONES]);
+  });
+
   it("instala una versión fija de Claude Code y fija las acciones por su commit", () => {
     expect(TEXTO).toMatch(/npm install -g @anthropic-ai\/claude-code@\d+\.\d+\.\d+\n/);
     const usos = TEXTO.split("\n").filter((linea) => /^\s*(- )?uses:/.test(linea));
@@ -328,6 +341,8 @@ describe("forma del workflow del worker", () => {
 // Pasos ejecutados de verdad, como los ejecuta GitHub: bash -eo pipefail.
 const HAY_BASH = spawnSync("bash", ["-c", "true"]).status === 0;
 const HAY_JQ = HAY_BASH && spawnSync("bash", ["-c", "command -v jq"]).status === 0;
+// Las comprobaciones del worker corren en un contenedor sin git (harness#533): ahí estas pruebas se saltan.
+const HAY_GIT = spawnSync("git", ["--version"]).status === 0;
 
 const TAREA_PENDIENTE = { schemaVersion: 1, id: "TA-001", title: "Tarea de prueba", status: "pending" };
 const FICHERO = ".diverger/demo/tasks/TA-001.json";
@@ -428,7 +443,7 @@ describe.skipIf(!HAY_BASH)("comprobación de las entradas", () => {
   });
 });
 
-describe.skipIf(!HAY_BASH)("worktree del worker", () => {
+describe.skipIf(!HAY_BASH || !HAY_GIT)("worktree del worker", () => {
   beforeEach(() => {
     git("init", "-q", "-b", "main");
     escribir(repo, FICHERO, TAREA_PENDIENTE);
@@ -732,7 +747,7 @@ exit \${CODIGO_DOCKER:-0}`);
 
 // El paso del commit, con la API de GitHub de mentira y un gh de mentira (EN-OPS-06): el commit dice
 // quién lanzó la ejecución, que es quien lanzó el bucle, y el CI de la PR lo acepta.
-describe.skipIf(!HAY_JQ)("commit del worker con quien lo lanzó", () => {
+describe.skipIf(!HAY_JQ || !HAY_GIT)("commit del worker con quien lo lanzó", () => {
   let servidor: Server | undefined;
   let worktree = "";
 
