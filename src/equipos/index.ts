@@ -2,7 +2,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { OpcionesContexto } from "../../lib/datos.js";
 import "../../lib/auth.js";
-import { crearEquipo, listarEquipos, prestarEquipo } from "./equipos.js";
+import { crearEquipo, devolverEquipo, listarEquipos, prestarEquipo } from "./equipos.js";
 
 export { type Equipo } from "./equipos.js";
 
@@ -26,6 +26,12 @@ export const rutas: FastifyPluginAsync<OpcionesContexto> = (app, { almacen }) =>
     if (resultado.error === "FALTAN_DATOS") return reply.code(400).send({ error: "Faltan la persona o la fecha de devolución" });
     if (resultado.error === "FECHA_NO_VALIDA") return reply.code(400).send({ error: "La fecha de devolución no es válida" });
     return reply.code(409).send({ error: "El equipo ya está prestado" });
+  });
+  app.post<{ Params: { id: string } }>("/api/equipos/:id/devolucion", async (request, reply) => {
+    const resultado = await devolverEquipo(almacen, request.params.id);
+    if ("equipo" in resultado) return reply.code(200).send(resultado.equipo);
+    if (resultado.error === "NO_EXISTE") return reply.code(404).send({ error: "No existe el equipo" });
+    return reply.code(409).send({ error: "El equipo no está prestado" });
   });
   return Promise.resolve();
 };

@@ -171,6 +171,70 @@ describe("POST /api/equipos/:id/prestamo", () => {
   });
 });
 
+describe("POST /api/equipos/:id/devolucion", () => {
+  async function conPortatil() {
+    const app = await servidor();
+    const { id } = (await app.inject({ method: "POST", url: "/api/equipos", headers, payload: { nombre: "Portátil 07" } })).json<{ id: string }>();
+    const prestar = () =>
+      app.inject({ method: "POST", url: `/api/equipos/${id}/prestamo`, headers, payload: { persona: "Ana Pérez", devolucion: "2026-11-20" } });
+    const devolver = (url = `/api/equipos/${id}/devolucion`) => app.inject({ method: "POST", url, headers });
+    const lista = async () => (await app.inject({ url: "/api/equipos", headers })).json<unknown[]>();
+    return { app, id, prestar, devolver, lista };
+  }
+
+  it("devuelve «Portátil 07»: 200 con prestado false y la lista lo muestra sin persona ni devolucion", async () => {
+    const { app, id, prestar, devolver, lista } = await conPortatil();
+    await prestar();
+    const respuesta = await devolver();
+    expect(respuesta.statusCode).toBe(200);
+    expect(respuesta.json()).toEqual({ id, nombre: "Portátil 07", prestado: false });
+    expect(await lista()).toEqual([{ id, nombre: "Portátil 07", prestado: false }]);
+    await app.close();
+  });
+
+  it("un equipo devuelto se puede volver a prestar", async () => {
+    const { app, prestar, devolver } = await conPortatil();
+    await prestar();
+    await devolver();
+    expect((await prestar()).statusCode).toBe(201);
+    await app.close();
+  });
+
+  it("un equipo sin prestar responde 409 «El equipo no está prestado»", async () => {
+    const { app, id, devolver, lista } = await conPortatil();
+    const respuesta = await devolver();
+    expect(respuesta.statusCode).toBe(409);
+    expect(respuesta.json()).toEqual({ error: "El equipo no está prestado" });
+    expect(await lista()).toEqual([{ id, nombre: "Portátil 07", prestado: false }]);
+    await app.close();
+  });
+
+  it("devolver dos veces seguidas responde 409 la segunda", async () => {
+    const { app, prestar, devolver } = await conPortatil();
+    await prestar();
+    expect((await devolver()).statusCode).toBe(200);
+    expect((await devolver()).statusCode).toBe(409);
+    await app.close();
+  });
+
+  it("un equipo que no existe responde 404 «No existe el equipo»", async () => {
+    const { app, devolver } = await conPortatil();
+    const respuesta = await devolver("/api/equipos/no-existe/devolucion");
+    expect(respuesta.statusCode).toBe(404);
+    expect(respuesta.json()).toEqual({ error: "No existe el equipo" });
+    await app.close();
+  });
+
+  it("sin token responde 401 y el equipo sigue prestado", async () => {
+    const { app, id, prestar, lista } = await conPortatil();
+    await prestar();
+    const respuesta = await app.inject({ method: "POST", url: `/api/equipos/${id}/devolucion` });
+    expect(respuesta.statusCode).toBe(401);
+    expect(await lista()).toEqual([{ id, nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" }]);
+    await app.close();
+  });
+});
+
 describe("GET /api/equipos", () => {
   it("con sesión iniciada devuelve 200 y la lista vacía si no hay equipos", async () => {
     const app = await servidor();

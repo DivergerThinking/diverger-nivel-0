@@ -88,6 +88,26 @@ export async function prestarEquipo(
   });
 }
 
+/** Resultado de apuntar una devolución: el equipo libre o el motivo por el que no se devuelve. */
+export type ResultadoDevolucion = { equipo: Equipo } | { error: "NO_EXISTE" | "NO_PRESTADO" };
+
+/** Devuelve un equipo prestado: vuelve a figurar libre, sin persona ni devolucion. */
+export async function devolverEquipo(almacen: Almacen, id: string): Promise<ResultadoDevolucion> {
+  return almacen.transaccion<ResultadoDevolucion>(async (tx) => {
+    const documento = await tx.obtener<DocumentoEquipo>(COLECCION_EQUIPOS, id);
+    if (documento === undefined) return { error: "NO_EXISTE" };
+    if (!documento.prestado) return { error: "NO_PRESTADO" };
+    const libre: DocumentoEquipo = {
+      id: documento.id,
+      nombre: documento.nombre,
+      nombreNormalizado: documento.nombreNormalizado,
+      prestado: false,
+    };
+    tx.guardar(COLECCION_EQUIPOS, id, libre);
+    return { equipo: aEquipo(libre) };
+  });
+}
+
 export async function listarEquipos(almacen: Almacen): Promise<Equipo[]> {
   const documentos = await almacen.listar<DocumentoEquipo>(COLECCION_EQUIPOS);
   return documentos.map(aEquipo);
