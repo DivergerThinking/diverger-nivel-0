@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "HU-PRE-03-equipos",
+  "title": "Equipos: apuntar la devolución (HU-PRE-03)",
+  "status": "pending",
+  "story": "HU-PRE-03",
+  "context": "equipos",
+  "modules": ["src/equipos"],
+  "contracts": ["spec/contextos/equipos/api.openapi.json"],
+  "dependsOn": ["HU-PRE-02-equipos", "HU-PRE-01-equipos"]
+}

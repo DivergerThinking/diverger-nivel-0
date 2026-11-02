@@ -1,0 +1,24 @@
+flowchart LR
+    INI["Préstamo de equipos de IT"]
+    EP_01["EP-01 · Acceso con Google"]
+    INI --> EP_01
+    EP_02["EP-02 · Equipos de la oficina"]
+    INI --> EP_02
+    EP_03["EP-03 · Préstamos y devoluciones"]
+    INI --> EP_03
+    HU_ACC_01["HU-ACC-01 · Entrar con la cuenta de Google · publicada"]
+    EP_01 --> HU_ACC_01
+    HU_EQU_01["HU-EQU-01 · Dar de alta un equipo · publicada"]
+    EP_02 --> HU_EQU_01
+    HU_EQU_02["HU-EQU-02 · Ver qué equipos están prestados · publicada"]
+    EP_02 --> HU_EQU_02
+    HU_PRE_01["HU-PRE-01 · Apuntar un préstamo · publicada"]
+    EP_03 --> HU_PRE_01
+    HU_PRE_02["HU-PRE-02 · Comprobar la fecha de devolución · publicada"]
+    EP_03 --> HU_PRE_02
+    HU_PRE_03["HU-PRE-03 · Apuntar la devolución · publicada"]
+    EP_03 --> HU_PRE_03
+    classDef epic fill:#ede7f6,stroke:#5e35b1,color:#311b92
+    classDef published fill:#e8f5e9,stroke:#43a047,color:#1b5e20
+    class EP_01,EP_02,EP_03 epic
+    class HU_ACC_01,HU_EQU_01,HU_EQU_02,HU_PRE_01,HU_PRE_02,HU_PRE_03 published

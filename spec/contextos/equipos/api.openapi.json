@@ -1,0 +1,222 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Equipos",
+    "version": "1.0.0",
+    "description": "API de los equipos de la oficina y sus préstamos. Los caminos, campos, códigos y errores son los de la API fijada por el cliente (intent.md, «API fijada por el cliente»): el inventario de IT se conecta a ella. Los errores son un objeto JSON {\"error\": \"<mensaje>\"} con el mensaje exacto que se indica."
+  },
+  "servers": [{ "url": "/" }],
+  "security": [{ "google": [] }],
+  "paths": {
+    "/api/equipos": {
+      "get": {
+        "operationId": "equipos.listarEquipos",
+        "summary": "Ver los equipos",
+        "responses": {
+          "200": {
+            "description": "Lista de equipos, cada uno con id, nombre y prestado; si está prestado, también persona y devolucion",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Equipo" } }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/SinSesion" }
+        }
+      },
+      "post": {
+        "operationId": "equipos.crearEquipo",
+        "summary": "Dar de alta un equipo",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/NuevoEquipo" },
+              "example": { "nombre": "Portátil 07" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Equipo dado de alta, sin prestar",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Equipo" },
+                "example": { "id": "…", "nombre": "Portátil 07", "prestado": false }
+              }
+            }
+          },
+          "400": {
+            "description": "El nombre falta o está vacío",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "example": { "error": "Falta el nombre del equipo" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/SinSesion" },
+          "409": {
+            "description": "Ya hay un equipo con ese nombre, sin distinguir mayúsculas ni espacios al principio o al final",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "example": { "error": "Ya hay un equipo con ese nombre" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/equipos/{id}/prestamo": {
+      "post": {
+        "operationId": "equipos.prestarEquipo",
+        "summary": "Prestar un equipo",
+        "parameters": [{ "$ref": "#/components/parameters/IdEquipo" }],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/NuevoPrestamo" },
+              "example": { "persona": "Ana Pérez", "devolucion": "2026-11-20" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Equipo prestado: id, nombre, prestado true, persona y devolucion",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Equipo" },
+                "example": { "id": "…", "nombre": "Portátil 07", "prestado": true, "persona": "Ana Pérez", "devolucion": "2026-11-20" }
+              }
+            }
+          },
+          "400": {
+            "description": "Faltan la persona o la fecha de devolución, o la fecha no es una fecha real",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "examples": {
+                  "faltanDatos": { "value": { "error": "Faltan la persona o la fecha de devolución" } },
+                  "fechaNoValida": { "value": { "error": "La fecha de devolución no es válida" } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/SinSesion" },
+          "404": { "$ref": "#/components/responses/NoExiste" },
+          "409": {
+            "description": "El equipo ya está prestado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "example": { "error": "El equipo ya está prestado" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/equipos/{id}/devolucion": {
+      "post": {
+        "operationId": "equipos.devolverEquipo",
+        "summary": "Apuntar la devolución",
+        "parameters": [{ "$ref": "#/components/parameters/IdEquipo" }],
+        "responses": {
+          "200": {
+            "description": "Equipo devuelto, con prestado false",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Equipo" },
+                "example": { "id": "…", "nombre": "Portátil 07", "prestado": false }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/SinSesion" },
+          "404": { "$ref": "#/components/responses/NoExiste" },
+          "409": {
+            "description": "El equipo no está prestado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "example": { "error": "El equipo no está prestado" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "google": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Token de identidad de Google con el correo verificado, emitido para el cliente OAuth de la aplicación, de una persona o de una cuenta de servicio"
+      }
+    },
+    "parameters": {
+      "IdEquipo": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string" }
+      }
+    },
+    "responses": {
+      "SinSesion": {
+        "description": "Sin un token válido",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" },
+            "example": { "error": "Inicia sesión con Google." }
+          }
+        }
+      },
+      "NoExiste": {
+        "description": "No existe el equipo",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" },
+            "example": { "error": "No existe el equipo" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Equipo": {
+        "type": "object",
+        "required": ["id", "nombre", "prestado"],
+        "properties": {
+          "id": { "type": "string" },
+          "nombre": { "type": "string" },
+          "prestado": { "type": "boolean" },
+          "persona": { "type": "string", "description": "Solo cuando el equipo está prestado" },
+          "devolucion": { "type": "string", "description": "Solo cuando el equipo está prestado: texto AAAA-MM-DD, devuelto igual que llegó" }
+        }
+      },
+      "NuevoEquipo": {
+        "type": "object",
+        "description": "Sin campos obligatorios en el esquema: si el nombre falta o está vacío, la respuesta es 400 «Falta el nombre del equipo».",
+        "properties": {
+          "nombre": { "type": "string" }
+        }
+      },
+      "NuevoPrestamo": {
+        "type": "object",
+        "description": "Sin campos obligatorios en el esquema: si falta la persona o la fecha, la respuesta es 400 «Faltan la persona o la fecha de devolución»; si la fecha no es real, 400 «La fecha de devolución no es válida».",
+        "properties": {
+          "persona": { "type": "string" },
+          "devolucion": { "type": "string", "description": "Texto AAAA-MM-DD; tiene que ser una fecha que exista y puede ser pasada" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": { "error": { "type": "string" } }
+      }
+    }
+  }
+}

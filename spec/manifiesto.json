@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "initiative": "prestamo-de-equipos-de-it",
+  "status": "approved",
+  "contexts": [
+    {
+      "id": "equipos",
+      "name": "Equipos",
+      "path": "spec/contextos/equipos/",
+      "module": "src/equipos",
+      "stories": [
+        "HU-ACC-01",
+        "HU-EQU-01",
+        "HU-EQU-02",
+        "HU-PRE-01",
+        "HU-PRE-02",
+        "HU-PRE-03"
+      ],
+      "dependsOn": [],
+      "contracts": [
+        {
+          "kind": "openapi",
+          "path": "spec/contextos/equipos/api.openapi.json"
+        }
+      ],
+      "publishes": [],
+      "subscribes": []
+    }
+  ],
+  "approved": {
+    "at": "2026-11-02T20:47:42Z",
+    "contracts": {
+      "spec/contextos/equipos/api.openapi.json": "1.0.0"
+    },
+    "lastAdr": 0
+  }
+}
