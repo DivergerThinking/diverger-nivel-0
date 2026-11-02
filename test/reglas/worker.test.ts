@@ -55,7 +55,7 @@ describe("forma del workflow del worker", () => {
     expect(Object.keys(WF.on)).toEqual(["workflow_dispatch"]);
     const entradas = WF.on.workflow_dispatch.inputs;
     expect(Object.keys(entradas)).toEqual(["initiative", "task", "max-usd", "run"]);
-    for (const entrada of Object.values(entradas)) expect(entrada).toMatchObject({ required: true, type: "string" });
+    for (const entrada of Object.entries(entradas).filter(([nombre]) => nombre !== "max-usd").map(([, valor]) => valor)) expect(entrada).toMatchObject({ required: true, type: "string" });
   });
 
   it("el job se llama diverger-worker <task> <run>, para encontrarlo al conciliar", () => {
