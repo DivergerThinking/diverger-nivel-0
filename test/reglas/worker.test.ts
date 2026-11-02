@@ -120,7 +120,7 @@ describe("forma del workflow del worker", () => {
 
   it("el modelo solo recibe la clave de Anthropic, ningún token de GitHub", () => {
     for (const nombre of ["Worker", "Worker, intento 2", "Worker, intento 3"]) {
-      expect(Object.keys(Object.fromEntries(Object.entries(paso(nombre).env).filter(([k]) => k !== "GASTADO")) ?? {}).sort()).toEqual(["ANTHROPIC_API_KEY", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]);
+      expect(Object.keys(paso(nombre).env ?? {}).filter((clave) => clave !== "GASTADO").sort()).toEqual(["ANTHROPIC_API_KEY", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]);
       expect(paso(nombre).run).toMatch(/^bash "\$GITHUB_WORKSPACE\/\.github\/diverger\/worker-modelo\.sh" [123]$/);
     }
     for (const anterior of PASOS.slice(0, indice("Worker"))) {
