@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "HU-PRE-03-equipos",
   "title": "Equipos: apuntar la devolución (HU-PRE-03)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-PRE-03",
   "context": "equipos",
   "modules": [

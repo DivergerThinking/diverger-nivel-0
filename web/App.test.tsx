@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { App } from "./App.js";
 import type { BotonDeGoogle } from "./sesion.js";
 
@@ -58,6 +58,54 @@ describe("App", () => {
     ]);
     expect(await screen.findByText("Portátil 07: prestado a Ana Pérez hasta el 2026-11-20")).toBeTruthy();
     expect(screen.getByText("Proyector sala 2: libre")).toBeTruthy();
+  });
+
+  function conDevolucion(devolucion: Response) {
+    const fetch = vi.fn((url: string, opciones?: RequestInit) =>
+      Promise.resolve(
+        url === "/api/config"
+          ? respuesta({ googleClientId: "cliente" })
+          : url === "/api/equipos"
+            ? respuesta([
+                { id: "a", nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" },
+                { id: "b", nombre: "Proyector sala 2", prestado: false },
+              ])
+            : url === "/api/equipos/a/devolucion" && opciones?.method === "POST"
+              ? devolucion
+              : respuesta({ email: "ana@example.com", nombre: "Ana" }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const boton: BotonDeGoogle = (_elemento, _clientId, alEntrar) => {
+      alEntrar("token-bueno");
+      return Promise.resolve();
+    };
+    render(<App botonDeGoogle={boton} />);
+    return fetch;
+  }
+
+  it("apunta la devolución de un equipo prestado y lo muestra libre", async () => {
+    const fetch = conDevolucion(respuesta({ id: "a", nombre: "Portátil 07", prestado: false }));
+    fireEvent.click(await screen.findByRole("button", { name: "Apuntar devolución" }));
+    expect(await screen.findByText("Portátil 07: libre")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Apuntar devolución" })).toBeNull();
+    expect(fetch).toHaveBeenCalledWith("/api/equipos/a/devolucion", {
+      method: "POST",
+      headers: { authorization: "Bearer token-bueno" },
+    });
+  });
+
+  it("solo ofrece apuntar la devolución en los equipos prestados", async () => {
+    conDevolucion(respuesta({}));
+    await screen.findByText("Proyector sala 2: libre");
+    expect(screen.getAllByRole("button", { name: "Apuntar devolución" })).toHaveLength(1);
+  });
+
+  it("enseña el motivo cuando el servidor no acepta la devolución", async () => {
+    conDevolucion(respuesta({ error: "El equipo no está prestado" }, 409));
+    fireEvent.click(await screen.findByRole("button", { name: "Apuntar devolución" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("El equipo no está prestado");
+    expect(screen.getByText("Portátil 07: prestado a Ana Pérez hasta el 2026-11-20")).toBeTruthy();
   });
 
   it("avisa cuando no hay equipos dados de alta", async () => {
