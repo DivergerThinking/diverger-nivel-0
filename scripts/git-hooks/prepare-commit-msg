@@ -2,6 +2,10 @@
 # Añade a cada commit de un agente los trailers de rol, modelo y tarea (EN-OPS-02).
 # El job del worker activa el hook (git config core.hooksPath scripts/git-hooks) y define
 # DIVERGER_ROL, DIVERGER_MODELO y DIVERGER_TAREA. Sin DIVERGER_TAREA el commit es de una persona.
+# Con DIVERGER_INICIADO_POR (el login de quien lanzó el harness) y DIVERGER_INICIADO_POR_ID (su id de
+# GitHub), añade también Diverger-Iniciado-por y Co-authored-by con su correo noreply (EN-OPS-06). Se
+# toman de GitHub (github.actor), nunca del modelo. DIVERGER_INICIADO_POR_NOMBRE es opcional: sin él,
+# Co-authored-by lleva el login.
 set -eu
 [ -n "${DIVERGER_TAREA:-}" ] || exit 0
 if [ -z "${DIVERGER_ROL:-}" ] || [ -z "${DIVERGER_MODELO:-}" ]; then
@@ -12,4 +16,17 @@ git interpret-trailers --in-place --if-exists replace \
   --trailer "Diverger-Rol: $DIVERGER_ROL" \
   --trailer "Diverger-Modelo: $DIVERGER_MODELO" \
   --trailer "Diverger-Tarea: $DIVERGER_TAREA" \
+  "$1"
+[ -n "${DIVERGER_INICIADO_POR:-}" ] || exit 0
+case "${DIVERGER_INICIADO_POR_ID:-}" in
+  '' | *[!0-9]*)
+    echo "Falta DIVERGER_INICIADO_POR_ID (el id de GitHub de $DIVERGER_INICIADO_POR) para el Co-authored-by" >&2
+    exit 1 ;;
+esac
+nombre=$(printf '%s' "${DIVERGER_INICIADO_POR_NOMBRE:-}" | tr -d '<>\r\n')
+# Co-authored-by sin reemplazar: el commit puede llevar ya el del agente (Claude).
+git interpret-trailers --in-place --if-exists replace \
+  --trailer "Diverger-Iniciado-por: $DIVERGER_INICIADO_POR" \
+  --if-exists addIfDifferent \
+  --trailer "Co-authored-by: ${nombre:-$DIVERGER_INICIADO_POR} <$DIVERGER_INICIADO_POR_ID+$DIVERGER_INICIADO_POR@users.noreply.github.com>" \
   "$1"
