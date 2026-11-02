@@ -55,15 +55,18 @@ describe("workflow del bucle desatendido", () => {
     expect(JOB.permissions).toEqual({ contents: "read", "id-token": "write" });
     expect(SIN_COMENTARIOS).not.toMatch(/GCP_DEPLOY_SA|environment:/);
     const auth = PASOS.filter((p) => p.uses?.startsWith("google-github-actions/auth@"));
-    expect(auth).toHaveLength(1);
-    expect(auth[0]?.with).toEqual({ workload_identity_provider: "${{ vars.GCP_WIF_PROVIDER }}",
-      service_account: "${{ vars.GCP_TELEMETRY_SA }}" });
+    // Uno para el arranque y otro al terminar: el bucle puede durar más que el token (harness#536).
+    expect(auth).toHaveLength(2);
+    for (const paso of auth) {
+      expect(paso.with).toEqual({ workload_identity_provider: "${{ vars.GCP_WIF_PROVIDER }}",
+        service_account: "${{ vars.GCP_TELEMETRY_SA }}" });
+    }
   });
 
   it("registra el resultado después del bucle, sin fallar el job si no puede", () => {
     const nombres = PASOS.map((p) => p.name ?? p.uses ?? "");
     const bucle = nombres.indexOf("Bucle");
-    const auth = nombres.findIndex((n) => n.startsWith("google-github-actions/auth@"));
+    const auth = nombres.findLastIndex((n) => n.startsWith("google-github-actions/auth@"));
     const registro = nombres.indexOf("Registrar el resultado");
     expect(bucle).toBeLessThan(auth);
     expect(auth).toBeLessThan(registro);
@@ -74,6 +77,12 @@ describe("workflow del bucle desatendido", () => {
     expect(registrar.run).toContain("gcloud logging write diverger-ejecucion \"$linea\" --payload-type=json");
     // gcloud solo escribe ese log: nada de despliegues ni de lecturas de GCP.
     expect(SIN_COMENTARIOS.match(/gcloud [a-z-]+ [a-z-]+/g)).toEqual(["gcloud logging write"]);
+  });
+
+  it("registra el arranque solo si consiguió el token de GCP (harness#536)", () => {
+    const nombres = PASOS.map((p) => p.name ?? p.uses ?? "");
+    expect(nombres.findIndex((n) => n.startsWith("google-github-actions/auth@"))).toBeLessThan(nombres.indexOf("Bucle"));
+    expect(paso("Bucle").run).toContain('[ "$GCP_ARRANQUE" = "success" ] && opciones+=(--log-project "$GCP_PROJECT_ID")');
   });
 
   it("no ejecuta ningún modelo", () => {
@@ -99,7 +108,8 @@ describe("workflow del bucle desatendido", () => {
     const permisos = Object.fromEntries(Object.entries(token.with ?? {}).filter(([k]) => k.startsWith("permission-")));
     expect(permisos).toEqual({ "permission-actions": "write", "permission-contents": "read", "permission-pull-requests": "read" });
     expect(token.with?.repositories).toBe("${{ github.event.repository.name }}");
-    expect(paso("Bucle").env).toEqual({ GH_TOKEN: "${{ steps.token-bucle.outputs.token }}" });
+    expect(paso("Bucle").env).toEqual({ GH_TOKEN: "${{ steps.token-bucle.outputs.token }}",
+      GCP_ARRANQUE: "${{ steps.gcp-arranque.outcome }}" });
   });
 
   it("ejecuta bucle.py del núcleo contra este repositorio y su rama base", () => {

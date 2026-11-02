@@ -49,7 +49,7 @@ jobs:
     timeout-minutes: 350
     permissions:
       contents: read
-      id-token: write # Solo para la cuenta de telemetría, al terminar (ADR 0017).
+      id-token: write # Solo para la cuenta de telemetría, al arrancar y al terminar (ADR 0017).
     env:
       INICIATIVA: ${{ inputs.initiative }}
       MAX_WORKERS: ${{ inputs.max-workers }}
@@ -103,13 +103,24 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.token-bucle.outputs.token }}
         run: bash .github/diverger/bucle-estado.sh
+      # Para registrar el arranque y que el panel enseñe la ejecución en curso (harness#536). Si falla, solo se
+      # pierde esa fila.
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        id: gcp-arranque
+        if: env.TELEMETRIA == 'true'
+        continue-on-error: true
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_TELEMETRY_SA }}
       - name: Bucle
         env:
           GH_TOKEN: ${{ steps.token-bucle.outputs.token }}
+          GCP_ARRANQUE: ${{ steps.gcp-arranque.outcome }}
         run: |
           opciones=(--initiative "$INICIATIVA" --repo "$GITHUB_REPOSITORY" --base "$GITHUB_REF_NAME"
                     --max-workers "$MAX_WORKERS" --project "$GITHUB_WORKSPACE" --results "$RUNNER_TEMP/resultados.jsonl")
           [ "$REINICIAR" = "true" ] && opciones+=(--restart)
+          [ "$GCP_ARRANQUE" = "success" ] && opciones+=(--log-project "$GCP_PROJECT_ID")
           set +e
           python3 .diverger-nucleo/plugins/diverger/server/bucle.py "${opciones[@]}" | tee salida.txt
           codigo=${PIPESTATUS[0]}
