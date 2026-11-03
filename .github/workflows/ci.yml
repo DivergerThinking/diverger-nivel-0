@@ -94,6 +94,42 @@ jobs:
           PR_BASE: ${{ github.base_ref }}
         run: node scripts/trailers.mjs "$RANGO"
 
+  # La PR de una tarea no toca la suite de aceptación (EN-CAL-01, ADR 0031 del harness). Cualquier PR que la
+  # toque se etiqueta «suite-modificada», para contar cada modificación; CODEOWNERS pide además la aprobación
+  # de un propietario de tests/aceptacion/.
+  suite:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # La etiqueta: crearla si falta y ponerla en la PR.
+      pull-requests: write
+    steps:
+      # La comprobación es la de la rama base: una PR no puede cambiar el script que la juzga.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+      - name: Commits de la PR
+        env:
+          NUMERO: ${{ github.event.pull_request.number }}
+        run: git fetch --quiet origin "refs/pull/$NUMERO/head"
+      - name: Suite de aceptación
+        id: suite
+        env:
+          RANGO: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+          PR_RAMA: ${{ github.head_ref }}
+        run: node scripts/suite.mjs "$RANGO"
+      - name: Contar la modificación
+        if: always() && steps.suite.outputs.modificada == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMERO: ${{ github.event.pull_request.number }}
+        run: |
+          gh label create suite-modificada -R "$GITHUB_REPOSITORY" --color B60205 \
+            --description "La PR modifica la suite de aceptación (EN-CAL-01)" 2>/dev/null || true
+          gh pr edit "$NUMERO" -R "$GITHUB_REPOSITORY" --add-label suite-modificada
+
   # Solo en la plantilla: un repositorio creado desde ella recibe los ficheros de este commit y
   # nada más, así que se exportan a una carpeta limpia y se comprueban ahí desde cero.
   repo-nuevo:

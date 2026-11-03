@@ -2,3 +2,6 @@
 # «codeowners» exige su aprobación en cualquier PR que toque estos ficheros, también en modo yolo.
 /.diverger/settings.json @joselcs @686f6c61
 /.github/CODEOWNERS @joselcs @686f6c61
+# La suite de aceptación es el examen de las historias (EN-CAL-01, ADR 0031 del harness): la cambia una
+# persona desde el backlog, nunca la PR de una tarea. Dos propietarios, para que uno apruebe las PR del otro.
+/tests/aceptacion/ @joselcs @686f6c61
