@@ -2,8 +2,19 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Estado",
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "description": "Contexto estado de la iniciativa de prueba de la escalera de reintentos."
   },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "google": []
+    }
+  ],
   "paths": {
     "/api/estado": {
       "get": {
@@ -47,12 +58,30 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Falta el inicio de sesión o el token no es válido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
     }
   },
   "components": {
+    "securitySchemes": {
+      "google": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Token de identidad de Google (Google Identity Services)"
+      }
+    },
     "schemas": {
       "Error": {
         "type": "object",
