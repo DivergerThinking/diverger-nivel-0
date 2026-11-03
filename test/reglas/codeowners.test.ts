@@ -1,5 +1,5 @@
-// CODEOWNERS sobre la configuración (EN-OPS-04): el CI falla si .diverger/settings.json o el propio
-// CODEOWNERS se quedan sin propietario. Se prueba el script del CI sobre carpetas de juguete.
+// CODEOWNERS sobre la configuración (EN-OPS-04) y la suite de aceptación (EN-CAL-01): el CI falla si
+// .diverger/settings.json, el propio CODEOWNERS o tests/aceptacion/ se quedan sin propietario. Se prueba el script del CI sobre carpetas de juguete.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const RAIZ = join(import.meta.dirname, "..", "..");
 const SCRIPT = join(RAIZ, "scripts", "codeowners.mjs");
-const BUENO = "/.diverger/settings.json @joselcs\n/.github/CODEOWNERS @joselcs\n";
+const SUITE = "/tests/aceptacion/ @joselcs @686f6c61\n";
+const BUENO = `${SUITE}/.diverger/settings.json @joselcs\n/.github/CODEOWNERS @joselcs\n`;
 
 let carpeta = "";
 
@@ -38,7 +39,7 @@ describe("CODEOWNERS de la configuración", () => {
   it.each(["*", "/.diverger/", ".diverger/", "/.diverger", "/.diverger/*.json", "settings.json", "**/settings.json", "/**"])(
     "el patrón %s cubre la configuración",
     (patron) => {
-      escribir(".github/CODEOWNERS", `${patron} @joselcs\n/.github/CODEOWNERS @joselcs\n`);
+      escribir(".github/CODEOWNERS", `${SUITE}${patron} @joselcs\n/.github/CODEOWNERS @joselcs\n`);
       expect(comprobar()).toEqual({ codigo: 0, errores: [] });
     },
   );
@@ -46,7 +47,7 @@ describe("CODEOWNERS de la configuración", () => {
   it.each(["/settings.json", "/.diverger/*.md", "/diverger/", "*.md", "/.diverger/settings"])(
     "el patrón %s no la cubre",
     (patron) => {
-      escribir(".github/CODEOWNERS", `${patron} @joselcs\n/.github/CODEOWNERS @joselcs\n`);
+      escribir(".github/CODEOWNERS", `${SUITE}${patron} @joselcs\n/.github/CODEOWNERS @joselcs\n`);
       expect(comprobar().errores).toEqual([
         ".github/CODEOWNERS: ninguna regla cubre .diverger/settings.json; añade «/.diverger/settings.json @titular»",
       ]);
@@ -68,7 +69,7 @@ describe("CODEOWNERS de la configuración", () => {
   });
 
   it("falla si el propio CODEOWNERS no tiene propietario", () => {
-    escribir(".github/CODEOWNERS", "/.diverger/settings.json @joselcs\n");
+    escribir(".github/CODEOWNERS", `${SUITE}/.diverger/settings.json @joselcs\n`);
     expect(comprobar().errores).toEqual([
       ".github/CODEOWNERS: ninguna regla cubre .github/CODEOWNERS; añade «/.github/CODEOWNERS @titular»",
     ]);
@@ -88,9 +89,33 @@ describe("CODEOWNERS de la configuración", () => {
   });
 
   it("usa el primer CODEOWNERS que encuentra GitHub", () => {
-    escribir("CODEOWNERS", "/.diverger/settings.json @joselcs\n/CODEOWNERS @joselcs\n");
+    escribir("CODEOWNERS", `${SUITE}/.diverger/settings.json @joselcs\n/CODEOWNERS @joselcs\n`);
     expect(comprobar()).toEqual({ codigo: 0, errores: [] });
     escribir(".github/CODEOWNERS", "/src/ @joselcs\n");
-    expect(comprobar().errores).toHaveLength(2);
+    expect(comprobar().errores).toHaveLength(3);
+  });
+});
+
+describe("CODEOWNERS de la suite de aceptación (EN-CAL-01)", () => {
+  it.each(["/tests/aceptacion/", "/tests/", "tests/aceptacion/", "aceptacion/", "/tests/aceptacion", "*.feature", "*"])(
+    "el patrón %s cubre la suite",
+    (patron) => {
+      escribir(".github/CODEOWNERS", `${patron} @joselcs\n/.diverger/settings.json @joselcs\n/.github/CODEOWNERS @joselcs\n`);
+      expect(comprobar()).toEqual({ codigo: 0, errores: [] });
+    },
+  );
+
+  it("falla si ninguna regla cubre la suite", () => {
+    escribir(".github/CODEOWNERS", "/.diverger/settings.json @joselcs\n/.github/CODEOWNERS @joselcs\n/tests/unitarios/ @joselcs\n");
+    expect(comprobar().errores).toEqual([
+      ".github/CODEOWNERS: ninguna regla cubre tests/aceptacion/; añade «/tests/aceptacion/ @titular»",
+    ]);
+  });
+
+  it("falla si una regla posterior sin propietarios la deja sin protección", () => {
+    escribir(".github/CODEOWNERS", `${BUENO}/tests/aceptacion/*.feature\n`);
+    expect(comprobar().errores).toEqual([
+      ".github/CODEOWNERS: la última regla que cubre tests/aceptacion/ no tiene propietarios y la deja sin protección",
+    ]);
   });
 });
