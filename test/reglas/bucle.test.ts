@@ -103,13 +103,17 @@ describe("workflow del bucle desatendido", () => {
       "sparse-checkout": "plugins/diverger/server" });
   });
 
-  it("lanza los workers con un token limitado a Actions y lectura de contenido y PR", () => {
+  it("lanza los workers con un token limitado a Actions, issues y lectura de contenido y PR", () => {
     const token = paso("token-bucle");
     const permisos = Object.fromEntries(Object.entries(token.with ?? {}).filter(([k]) => k.startsWith("permission-")));
-    expect(permisos).toEqual({ "permission-actions": "write", "permission-contents": "read", "permission-pull-requests": "read" });
+    // issues: write, para avisar de una tarea bloqueada (harness ADR 0029).
+    expect(permisos).toEqual({ "permission-actions": "write", "permission-contents": "read", "permission-issues": "write",
+      "permission-pull-requests": "read" });
     expect(token.with?.repositories).toBe("${{ github.event.repository.name }}");
     expect(paso("Bucle").env).toEqual({ GH_TOKEN: "${{ steps.token-bucle.outputs.token }}",
-      GCP_ARRANQUE: "${{ steps.gcp-arranque.outcome }}" });
+      GCP_ARRANQUE: "${{ steps.gcp-arranque.outcome }}", LANZADO_POR: "${{ github.actor }}" });
+    // La issue se asigna a quien lanzó el bucle, solo si es una persona: un «…[bot]» no pasa la expresión.
+    expect(paso("Bucle").run).toContain('[[ "$LANZADO_POR" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] && opciones+=(--notify "$LANZADO_POR")');
   });
 
   it("ejecuta bucle.py del núcleo contra este repositorio y su rama base", () => {
