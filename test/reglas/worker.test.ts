@@ -55,11 +55,15 @@ function paso(nombre: string): Paso {
 }
 
 describe("forma del workflow del worker", () => {
-  it("se lanza solo con workflow_dispatch y las entradas initiative, task, max-usd y run", () => {
+  it("se lanza solo con workflow_dispatch y las entradas initiative, task, max-usd, run, attempt y previous", () => {
     expect(Object.keys(WF.on)).toEqual(["workflow_dispatch"]);
     const entradas = WF.on.workflow_dispatch.inputs;
-    expect(Object.keys(entradas)).toEqual(["initiative", "task", "max-usd", "run"]);
-    for (const entrada of Object.entries(entradas).filter(([nombre]) => nombre !== "max-usd").map(([, valor]) => valor)) expect(entrada).toMatchObject({ required: true, type: "string" });
+    expect(Object.keys(entradas)).toEqual(["initiative", "task", "max-usd", "run", "attempt", "previous"]);
+    const opcionales = ["max-usd", "attempt", "previous"];
+    for (const entrada of Object.entries(entradas).filter(([nombre]) => !opcionales.includes(nombre)).map(([, valor]) => valor)) expect(entrada).toMatchObject({ required: true, type: "string" });
+    // Escalera de reintentos (harness ADR 0029): sin ellas, es el primer intento.
+    expect(entradas.attempt).toMatchObject({ required: false, type: "string", default: "1" });
+    expect(entradas.previous).toMatchObject({ required: false, type: "string", default: "" });
   });
 
   it("el job se llama diverger-worker <task> <run>, para encontrarlo al conciliar", () => {
@@ -254,6 +258,34 @@ describe("forma del workflow del worker", () => {
     expect(pr).toContain('echo "<!-- diverger:task=$TAREA;run=$EJECUCION -->"');
     expect(pr).toContain('--head "$RAMA"');
     expect(pr).toContain('--base "$GITHUB_REF_NAME"');
+  });
+
+  it("sin cambios solo sigue si el modelo dijo YA-CUBIERTA, y entonces la PR solo marca la tarea y lo explica (harness#538)", () => {
+    const resultado = paso("Comprobar el resultado").run ?? "";
+    expect(resultado).toMatch(
+      /if git diff --cached --quiet; then\s+\[ -s "\$RUNNER_TEMP\/cubierta" \] \|\| fallar "El worker no ha cambiado nada"/,
+    );
+    expect(resultado.indexOf("comprobaciones")).toBeLessThan(resultado.indexOf("cubierta"));
+    expect(paso("Commit con los trailers").run).toContain('[ ! -s "$RUNNER_TEMP/solo-marca" ] || tipo=chore');
+    expect(paso("Rama y PR").run).toContain("**Solo marca la tarea como hecha.**");
+    expect(MODELO_SH).toContain("grep -E '^(YA-CUBIERTA|ALREADY-DONE):'");
+    expect(MODELO_SH).toContain('rm -f "$RUNNER_TEMP/cubierta"');
+  });
+
+  it("la escalera de reintentos: lee el diagnóstico del job anterior sin token en env y deja siempre el suyo (harness ADR 0029)", () => {
+    const diagnostico = PASOS.filter((p) => p.with?.name === "diverger-diagnostico");
+    expect(diagnostico).toHaveLength(2);
+    const [descarga, subida] = diagnostico;
+    expect(descarga?.with?.["run-id"]).toBe("${{ env.PREVIO }}");
+    expect(descarga?.if).toBe("env.INTENTO_BUCLE != '1' && env.PREVIO != ''");
+    expect(descarga?.["continue-on-error"]).toBe(true);
+    expect(descarga?.env).toBeUndefined();
+    expect(PASOS.findIndex((p) => p === descarga)).toBeLessThan(indice("Worker"));
+    expect(paso("Diagnóstico para el intento siguiente").if).toBe("always()");
+    expect(subida?.if).toBe("always()");
+    expect(MODELO_SH).toContain('case "${INTENTO_BUCLE:-1}" in');
+    expect(MODELO_SH).toContain("Empieza de cero");
+    expect(MODELO_SH).toContain("Replanifica antes de escribir");
   });
 
   it("activa el auto-merge de su PR y, si no puede, avisa sin fallar (HU-GP-01)", () => {
