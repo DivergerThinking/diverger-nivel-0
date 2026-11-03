@@ -1,0 +1,112 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Avisos",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/avisos": {
+      "post": {
+        "operationId": "avisos.mandarAviso",
+        "summary": "Manda un aviso por correo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "para": {
+                    "type": "string"
+                  },
+                  "texto": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "texto"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Aviso mandado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enviado": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "enviado"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Falta el destinatario",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "avisos.listarAvisos",
+        "summary": "Lista los avisos mandados",
+        "responses": {
+          "200": {
+            "description": "Avisos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "para": {
+                        "type": "string"
+                      },
+                      "texto": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "para",
+                      "texto"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      }
+    }
+  }
+}
