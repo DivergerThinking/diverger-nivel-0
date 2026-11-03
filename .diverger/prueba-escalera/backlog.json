@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "initiative": {
+    "id": "prueba-escalera",
+    "title": "Prueba de la escalera de reintentos",
+    "language": "es",
+    "vision": "Comprobar de verdad la escalera de reintentos del bucle (harness#51, ADR 0029).",
+    "summary": "Iniciativa de prueba: una tarea que no se puede hacer sin una dependencia nueva, una independiente y otra que depende de la primera."
+  },
+  "epics": [
+    {
+      "id": "EP-01",
+      "title": "Avisos",
+      "description": "Avisos a quien tiene un equipo prestado."
+    }
+  ],
+  "stories": [
+    {
+      "id": "HU-AVI-01",
+      "epic": "EP-01",
+      "kind": "story",
+      "title": "Mandar un aviso por correo",
+      "role": "técnico de IT",
+      "goal": "mandar un aviso por correo con nodemailer",
+      "benefit": "que la persona sepa que tiene que devolver un equipo",
+      "requirements": [
+        "RQ.001"
+      ],
+      "acceptanceCriteria": [
+        {
+          "type": "positive",
+          "given": "un técnico de IT con sesión iniciada",
+          "when": "envía POST /api/avisos con {\"para\": \"ana@example.com\", \"texto\": \"Devuelve el portátil\"}",
+          "then": "el aviso se manda con nodemailer y recibe 202 con {\"enviado\": true}"
+        },
+        {
+          "type": "negative",
+          "given": "un técnico de IT con sesión iniciada",
+          "when": "envía POST /api/avisos con {\"texto\": \"Devuelve el portátil\"}",
+          "then": "recibe 400 con {\"error\": \"Falta el destinatario\"} y no se manda nada"
+        }
+      ],
+      "priority": "must",
+      "estimate": {
+        "size": "S",
+        "hours": 2
+      },
+      "storyPoints": 2,
+      "status": "approved",
+      "blockedBy": [],
+      "notes": "El correo se manda con la librería nodemailer (decisión del cliente), que hoy no está en package.json."
+    },
+    {
+      "id": "HU-AVI-02",
+      "epic": "EP-01",
+      "kind": "story",
+      "title": "Consultar el estado del servicio",
+      "role": "técnico de IT",
+      "goal": "saber si el servicio está en marcha",
+      "benefit": "comprobarlo antes de prestar un equipo",
+      "requirements": [
+        "RQ.001"
+      ],
+      "acceptanceCriteria": [
+        {
+          "type": "positive",
+          "given": "el servicio en marcha",
+          "when": "alguien envía GET /api/estado",
+          "then": "recibe 200 con {\"estado\": \"en marcha\"}"
+        },
+        {
+          "type": "negative",
+          "given": "el servicio en marcha",
+          "when": "alguien envía GET /api/estado?formato=xml",
+          "then": "recibe 400 con {\"error\": \"Formato no admitido\"}"
+        }
+      ],
+      "priority": "must",
+      "estimate": {
+        "size": "S",
+        "hours": 2
+      },
+      "storyPoints": 2,
+      "status": "approved",
+      "blockedBy": []
+    },
+    {
+      "id": "HU-AVI-03",
+      "epic": "EP-01",
+      "kind": "story",
+      "title": "Ver los avisos enviados",
+      "role": "técnico de IT",
+      "goal": "ver los avisos que se han mandado",
+      "benefit": "saber a quién se ha avisado ya",
+      "requirements": [
+        "RQ.001"
+      ],
+      "acceptanceCriteria": [
+        {
+          "type": "positive",
+          "given": "un aviso mandado a ana@example.com",
+          "when": "envía GET /api/avisos",
+          "then": "recibe 200 con una lista que incluye el aviso a ana@example.com"
+        },
+        {
+          "type": "negative",
+          "given": "ningún aviso mandado",
+          "when": "envía GET /api/avisos",
+          "then": "recibe 200 con una lista vacía"
+        }
+      ],
+      "priority": "must",
+      "estimate": {
+        "size": "S",
+        "hours": 2
+      },
+      "storyPoints": 2,
+      "status": "approved",
+      "blockedBy": [
+        "HU-AVI-01"
+      ]
+    }
+  ],
+  "tasks": [],
+  "team": [],
+  "sprints": [],
+  "assumptions": [],
+  "openQuestions": []
+}

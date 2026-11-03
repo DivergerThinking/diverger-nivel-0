@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "initiative": "prueba-escalera",
+  "status": "approved",
+  "contexts": [
+    {
+      "id": "avisos",
+      "name": "Avisos",
+      "path": "spec/contextos/avisos/",
+      "module": "src/avisos",
+      "stories": [
+        "HU-AVI-01",
+        "HU-AVI-03"
+      ],
+      "dependsOn": [],
+      "contracts": [
+        {
+          "kind": "openapi",
+          "path": "spec/contextos/avisos/api.openapi.json"
+        }
+      ],
+      "publishes": [],
+      "subscribes": []
+    },
+    {
+      "id": "estado",
+      "name": "Estado",
+      "path": "spec/contextos/estado/",
+      "module": "src/estado",
+      "stories": [
+        "HU-AVI-02"
+      ],
+      "dependsOn": [],
+      "contracts": [
+        {
+          "kind": "openapi",
+          "path": "spec/contextos/estado/api.openapi.json"
+        }
+      ],
+      "publishes": [],
+      "subscribes": []
+    }
+  ],
+  "approved": {
+    "at": "2026-11-03T16:00:00Z",
+    "contracts": {
+      "spec/contextos/avisos/api.openapi.json": "1.0.0",
+      "spec/contextos/estado/api.openapi.json": "1.0.0"
+    },
+    "lastAdr": 0
+  }
+}
