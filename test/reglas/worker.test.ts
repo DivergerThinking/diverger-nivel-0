@@ -431,6 +431,9 @@ describe.skipIf(!HAY_BASH)("comprobación de las entradas", () => {
     [{ TAREA: "../TA-001" }, "La tarea «../TA-001» no es válida"],
     [{ TAREA: "TA-001.json" }, "La tarea «TA-001.json» no es válida"],
     [{ INICIATIVA: "Demo; rm -rf /" }, "La iniciativa «Demo; rm -rf /» no es válida"],
+    // Sus ramas serían las de mantenimiento del harness, que el CI de trailers no compara con el worker (harness#528).
+    [{ INICIATIVA: "reinicio" }, "La iniciativa «reinicio» no se admite: sus ramas son las de mantenimiento del kit de evaluación del harness"],
+    [{ INICIATIVA: "ajustes" }, "La iniciativa «ajustes» no se admite: sus ramas son las de mantenimiento del kit de evaluación del harness"],
     [{ EJECUCION: "$(id)" }, "La ejecución «$(id)» no es válida"],
     [{ MAX_USD: "diez" }, "DIVERGER_WORKER_MAX_BUDGET_USD tiene que ser un importe en USD, como 0.50"],
     [{ MAX_TURNOS: "0" }, "DIVERGER_WORKER_MAX_TURNS tiene que ser un entero entre 1 y 999"],
@@ -624,6 +627,14 @@ echo "{\\"subtype\\":\\"success\\",\\"is_error\\":false,\\"num_turns\\":3,\\"tot
     expect(readFileSync(salidaPaso, "utf8")).toBe("coste=0.2\n");
   });
 
+  it("lo que queda del tope se redondea hacia abajo: el intento nunca recibe más de lo que queda", () => {
+    writeFileSync(join(temp, "salida-1.json"), JSON.stringify({ session_id: "s-1" }));
+    writeFileSync(join(temp, "comprobaciones-1.log"), "FAIL\n");
+    expect(script(SCRIPT_MODELO, "2", { TOPE_JOB: "10.00", GASTADO: "3.456" }).codigo).toBe(0);
+    const args = readFileSync(join(temp, "args-claude"), "utf8").split("\n");
+    expect(args[args.indexOf("--max-budget-usd") + 1]).toBe("6.54");
+  });
+
   it("sin TOPE_JOB ni gasto anterior, el intento recibe MAX_USD entero", () => {
     expect(script(SCRIPT_MODELO, "1").codigo).toBe(0);
     const args = readFileSync(join(temp, "args-claude"), "utf8").split("\n");
@@ -638,10 +649,11 @@ echo "{\\"subtype\\":\\"success\\",\\"is_error\\":false,\\"num_turns\\":3,\\"tot
   });
 
   it.each([
-    ["el último coste, no la suma, porque la sesión reanudada ya lo incluye", "success:0.2 failure:0.5 skipped:", 0.5],
+    ["el mayor coste, no la suma, porque la sesión reanudada ya lo incluye", "success:0.2 failure:0.5 skipped:", 0.5],
+    ["el mayor aunque el último intento diga menos", "failure:0.9 success:0.3 skipped:", 0.9],
     ["el de un solo intento", "success:1.25 skipped: skipped:", 1.25],
     ["nada si un intento lanzado no dejó coste: el bucle cuenta el tope entero", "failure:0.4 failure: skipped:", undefined],
-    ["nada si no se lanzó ningún intento", "skipped: skipped: skipped:", undefined],
+    ["0 si no se lanzó ningún intento: el job no gastó nada", "skipped: skipped: skipped:", 0],
   ])("coste.json lleva %s", (_caso, intentos, coste) => {
     expect(script(SCRIPT_COSTE, "", { INTENTOS: intentos }).codigo).toBe(0);
     const fichero = join(temp, "coste", "coste.json");
@@ -653,6 +665,8 @@ echo "{\\"subtype\\":\\"success\\",\\"is_error\\":false,\\"num_turns\\":3,\\"tot
     ["el de max-usd si es menor que el techo", "3", { budget: { maxWorkerUsd: 5 } }, "3.00"],
     ["el techo de settings.json si max-usd es mayor", "20", { budget: { maxWorkerUsd: 5 } }, "5.00"],
     ["10 USD como techo si settings.json no lo fija", "20", undefined, "10.00"],
+    ["10 USD como techo si settings.json fija uno que el worker no puede usar", "20", { budget: { maxWorkerUsd: "abc" } }, "10.00"],
+    ["10 USD como techo si settings.json fija menos de 0,50", "20", { budget: { maxWorkerUsd: 0.2 } }, "10.00"],
   ])("el tope del job es %s", (_caso, maxUsd, ajustes, tope) => {
     if (ajustes) escribir(repo, ".diverger/settings.json", ajustes);
     const salidaPaso = join(temp, "github_output");

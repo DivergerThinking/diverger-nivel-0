@@ -88,6 +88,8 @@ jobs:
         run: |
           fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
           [[ "$INICIATIVA" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] || fallar "La iniciativa «$INICIATIVA» no es válida"
+          # diverger/reinicio/… y diverger/ajustes/… son las ramas de mantenimiento del harness (harness#528).
+          [[ "$INICIATIVA" != reinicio && "$INICIATIVA" != ajustes ]] || fallar "La iniciativa «$INICIATIVA» no se admite: sus ramas son las de mantenimiento del kit de evaluación del harness"
           [[ "$TAREA" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ && "$TAREA" != *.json ]] || fallar "La tarea «$TAREA» no es válida"
           [[ "$EJECUCION" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || fallar "La ejecución «$EJECUCION» no es válida"
           [[ "$HARNESS_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || fallar "DIVERGER_HARNESS_REF no es válida"
@@ -206,6 +208,8 @@ jobs:
         id: tope
         run: |
           techo=$(jq -r '.budget.maxWorkerUsd // 10' .diverger/settings.json 2>/dev/null || echo 10)
+          # Lo mismo que hace el bucle: un valor que el worker no puede usar vale 10, no 0.
+          awk -v techo="$techo" 'BEGIN { exit !(techo ~ /^[0-9]+(\.[0-9]+)?$/ && techo + 0 >= 0.5 && techo + 0 < 1000) }' || techo=10
           awk -v tope="$MAX_USD" -v techo="$techo" 'BEGIN { printf "tope=%.2f\n", (tope + 0 < techo + 0 ? tope : techo) }' >> "$GITHUB_OUTPUT"
       - name: Worker
         id: worker-1
