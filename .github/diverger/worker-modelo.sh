@@ -5,6 +5,10 @@
 # Uso: worker-modelo.sh <intento>
 #   1: lanza la skill diverger-dev:implement con la iniciativa y la tarea.
 #   2 o más: sigue la misma sesión con la salida de las comprobaciones que fallaron en el intento anterior.
+# Son los intentos dentro del job. INTENTO_BUCLE es el del bucle (ADR 0029 del harness): en el 2 y el 3, el primer
+# intento del job recibe además el diagnóstico del job anterior ($RUNNER_TEMP/diagnostico-anterior.md).
+# Si el modelo termina con «BLOQUEADA:», el intento falla con ese motivo; con «YA-CUBIERTA:», deja el motivo en
+# $RUNNER_TEMP/cubierta (harness#538).
 #
 # Permisos del modelo:
 # - Solo tiene la clave de Anthropic: ningún token de GitHub ni de GCP.
@@ -44,6 +48,20 @@ awk -v restante="$restante" 'BEGIN { exit !(restante >= 0.5) }' \
 
 if [ "$intento" = 1 ]; then
   instrucciones="Usa la skill diverger-dev:implement para construir la tarea $TAREA de la iniciativa $INICIATIVA."
+  diagnostico=""
+  [ -s "$RUNNER_TEMP/diagnostico-anterior.md" ] && diagnostico=$(head -c 12000 "$RUNNER_TEMP/diagnostico-anterior.md")
+  case "${INTENTO_BUCLE:-1}" in
+    2) instrucciones="$instrucciones
+
+Es el segundo intento del bucle para esta tarea: un worker anterior falló. Empieza de cero: lo que hizo no está en la rama, no des nada por bueno de su razonamiento y vuelve a leer la tarea, su historia, el test de aceptación y el contrato. Este es su diagnóstico:
+
+${diagnostico:-(no se ha podido leer)}" ;;
+    3) instrucciones="$instrucciones
+
+Es el tercer y último intento del bucle para esta tarea: dos workers anteriores fallaron. Replanifica antes de escribir: relee la especificación del contexto, el contrato y el test de aceptación, busca en los diagnósticos qué hizo fallar los intentos y construye lo mínimo que cumple cada criterio de aceptación, en pasos pequeños. Si la tarea no se puede hacer tal como está especificada, para con una línea «BLOQUEADA:» que diga qué hay que cambiar en el plan o en la especificación. Estos son los diagnósticos, del más reciente al primero:
+
+${diagnostico:-(no se han podido leer)}" ;;
+  esac
   sesion=()
 else
   anterior=$((intento - 1))
@@ -84,4 +102,12 @@ tipo=$(jq -r .subtype "$RUNNER_TEMP/salida-$intento.json")
   || fallar "El worker no terminó bien en el intento $intento ($tipo): error_max_turns y error_max_budget_usd son los topes"
 if jq -r .result "$RUNNER_TEMP/salida-$intento.json" | grep -qE '^(BLOQUEADA|BLOCKED):'; then
   fallar "El worker se ha parado: $(jq -r .result "$RUNNER_TEMP/salida-$intento.json" | grep -E '^(BLOQUEADA|BLOCKED):' | head -1)"
+fi
+# La tarea ya estaba hecha por otra anterior (harness#538): el modelo lo dice en una línea y no cambia nada. Se guarda
+# el motivo para que «Comprobar el resultado» abra una PR que solo marca la tarea. Solo vale el del último intento.
+rm -f "$RUNNER_TEMP/cubierta"
+cubierta=$(jq -r .result "$RUNNER_TEMP/salida-$intento.json" | grep -E '^(YA-CUBIERTA|ALREADY-DONE):' | head -1 || true)
+if [ -n "$cubierta" ]; then
+  printf '%s\n' "${cubierta:0:1000}" > "$RUNNER_TEMP/cubierta"
+  echo "::notice::El worker dice que la tarea ya estaba cubierta: ${cubierta:0:300}"
 fi

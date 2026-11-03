@@ -96,6 +96,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-actions: write
           permission-contents: read
+          permission-issues: write # Para avisar de una tarea bloqueada con una issue (ADR 0029 del harness).
           permission-pull-requests: read
       # El gasto vive en run.json, que no se versiona: sin esto, relanzar en un job nuevo lo pondría a cero (ADR 0024).
       - name: Recuperar el estado anterior
@@ -116,11 +117,14 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.token-bucle.outputs.token }}
           GCP_ARRANQUE: ${{ steps.gcp-arranque.outcome }}
+          # A quién se asigna la issue de una tarea bloqueada: quien lanzó el bucle, si es una persona (ADR 0029).
+          LANZADO_POR: ${{ github.actor }}
         run: |
           opciones=(--initiative "$INICIATIVA" --repo "$GITHUB_REPOSITORY" --base "$GITHUB_REF_NAME"
                     --max-workers "$MAX_WORKERS" --project "$GITHUB_WORKSPACE" --results "$RUNNER_TEMP/resultados.jsonl")
           [ "$REINICIAR" = "true" ] && opciones+=(--restart)
           [ "$GCP_ARRANQUE" = "success" ] && opciones+=(--log-project "$GCP_PROJECT_ID")
+          [[ "$LANZADO_POR" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] && opciones+=(--notify "$LANZADO_POR")
           set +e
           python3 .diverger-nucleo/plugins/diverger/server/bucle.py "${opciones[@]}" | tee salida.txt
           codigo=${PIPESTATUS[0]}
