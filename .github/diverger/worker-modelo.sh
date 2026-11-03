@@ -34,11 +34,11 @@ unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL GOOGLE_APPLICA
   CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE GOOGLE_GHA_CREDS_PATH
 
 # El tope es del job, no de cada intento (ADR 0024): --max-budget-usd no cuenta lo gastado antes de reanudar, así
-# que cada intento recibe lo que queda. TOPE_JOB y GASTADO llegan de las salidas de pasos anteriores, que el código de
+# que cada intento recibe lo que queda, redondeado hacia abajo. TOPE_JOB y GASTADO llegan de las salidas de pasos anteriores, que el código de
 # las comprobaciones no puede cambiar. Una sesión reanudada ya incluye el gasto anterior: es un total, no se suma.
 tope="${TOPE_JOB:-$MAX_USD}"
 gastado="${GASTADO:-0}"
-restante=$(awk -v tope="$tope" -v gastado="$gastado" 'BEGIN { printf "%.2f", tope - gastado }')
+restante=$(awk -v tope="$tope" -v gastado="$gastado" 'BEGIN { printf "%.2f", int((tope - gastado) * 100) / 100 }')
 awk -v restante="$restante" 'BEGIN { exit !(restante >= 0.5) }' \
   || fallar "El worker ha gastado $gastado USD de su tope de $tope USD: no queda margen para otro intento"
 

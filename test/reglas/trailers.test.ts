@@ -226,6 +226,86 @@ describe.skipIf(!HAY_GIT)("trailer de quien lanzó el harness (EN-OPS-06)", () =
   });
 });
 
+// Commits de preparar-nivel-0.yml y ajustes-nivel-0.yml del harness (harness#528): autor diverger-harness[bot],
+// con los cuatro trailers, en diverger/reinicio/<número> o diverger/ajustes/<número>. El harness es privado y el
+// CI de la aplicación no puede leer sus ejecuciones: no se comparan con una, pero sí con el usuario de GitHub.
+const CUERPO_REINICIO = "Deja `diverger-nivel-0` con solo la plantilla. La abre `preparar-nivel-0.yml` del harness: https://github.com/DivergerThinking/Diverger-ExP-Harness/actions/runs/19123456789\n";
+
+function commitDeMantenimiento(trailers: string[] | undefined): void {
+  git(["config", "core.hooksPath", join(repo, "sin-hooks")]);
+  const lista = trailers ?? [];
+  commit(`chore: reinicio de diverger-nivel-0${lista.length ? `\n\n${lista.join("\n")}` : ""}`, HARNESS);
+}
+
+function trailersDeMantenimiento(iniciadoPor: string, id = PERSONAS[iniciadoPor]?.id ?? 1): string[] {
+  return ["Diverger-Rol: Evaluación", "Diverger-Modelo: ninguno", "Diverger-Tarea: EN-GP-06",
+    `Diverger-Iniciado-por: ${iniciadoPor}`, `Co-authored-by: ${iniciadoPor} <${String(id)}+${iniciadoPor}@users.noreply.github.com>`];
+}
+
+describe.skipIf(!HAY_GIT)("commits de mantenimiento del kit de evaluación (harness#528)", () => {
+  // Sin ejecuciones en la API: si el CI buscara la del worker, fallaría.
+  const SIN_EJECUCIONES = { ejecuciones: [], usuarios: PERSONAS };
+
+  it.each(["diverger/reinicio/19123456789", "diverger/ajustes/19123456789"])(
+    "en %s, un commit del harness con los cuatro trailers pasa sin buscar la ejecución del worker", async (rama) => {
+      commitDeMantenimiento(trailersDeMantenimiento("joselcs"));
+      expect(await comprobarPR(SIN_EJECUCIONES, CUERPO_REINICIO, rama)).toEqual({ codigo: 0, errores: "" });
+    });
+
+  it("sin trailers, falla", async () => {
+    commitDeMantenimiento(undefined);
+    const { codigo, errores } = await comprobarPR(SIN_EJECUCIONES, CUERPO_REINICIO, "diverger/reinicio/19123456789");
+    expect(codigo).toBe(1);
+    for (const falta of ["Falta el trailer de rol", "Falta el trailer de modelo", "Falta el trailer de tarea",
+      "Falta el trailer de quien lanzó el harness (Diverger-Iniciado-por)"]) expect(errores).toContain(falta);
+  });
+
+  it("falla si Diverger-Iniciado-por es un bot", async () => {
+    commitDeMantenimiento(trailersDeMantenimiento("diverger-harness[bot]", 350234409));
+    const { codigo, errores } = await comprobarPR(SIN_EJECUCIONES, CUERPO_REINICIO, "diverger/ajustes/19123456789");
+    expect(codigo).toBe(1);
+    expect(errores).toContain("El trailer de quien lanzó el harness es una GitHub App, no una persona (Diverger-Iniciado-por: diverger-harness[bot])");
+  });
+
+  it("falla si el Co-authored-by no es el correo noreply de quien dice Diverger-Iniciado-por, con su id de GitHub", async () => {
+    commitDeMantenimiento(trailersDeMantenimiento("joselcs", 999));
+    const { codigo, errores } = await comprobarPR(SIN_EJECUCIONES, CUERPO_REINICIO, "diverger/reinicio/19123456789");
+    expect(codigo).toBe(1);
+    expect(errores).toContain("Falta el Co-authored-by de quien lanzó el harness con su correo noreply (1234567+joselcs@users.noreply.github.com)");
+  });
+
+  it("falla si GitHub no conoce a quien dice Diverger-Iniciado-por", async () => {
+    commitDeMantenimiento(trailersDeMantenimiento("nadie-conocido"));
+    const { codigo, errores } = await comprobarPR(SIN_EJECUCIONES, CUERPO_REINICIO, "diverger/reinicio/19123456789");
+    expect(codigo).toBe(1);
+    expect(errores).toContain("no se encuentra a nadie-conocido en GitHub");
+  });
+
+  it.each(["diverger/reinicio/abc", "diverger/reinicio/123/x", "diverger/ajustes/12a", "diverger/reinicios/123", "otro/diverger/reinicio/123"])(
+    "%s no es una rama de mantenimiento: se busca la ejecución del worker", async (rama) => {
+      commitDeMantenimiento(trailersDeMantenimiento("joselcs"));
+      const { codigo, errores } = await comprobarPR(SIN_EJECUCIONES, CUERPO_REINICIO, rama);
+      expect(codigo).toBe(1);
+      expect(errores).toContain("No se puede comprobar quién lanzó la ejecución: la PR no enlaza el job del worker");
+    });
+
+  it("en la rama de un worker, el commit del harness sigue con la comprobación completa", async () => {
+    // Iniciado-por de ana-lopez con su Co-authored-by bien puesto: en una rama de mantenimiento pasaría, pero el
+    // worker que enlaza la PR lo lanzó joselcs.
+    commitDelHarness("ana-lopez");
+    const { codigo, errores } = await comprobarPR({ ejecuciones: lanzadoPorElBucle("joselcs"), usuarios: PERSONAS });
+    expect(codigo).toBe(1);
+    expect(errores).toContain("Diverger-Iniciado-por: ana-lopez; la lanzó joselcs");
+  });
+
+  it("en la rama de un worker, Diverger-Iniciado-por de un bot también falla", async () => {
+    commitDelHarness("diverger-harness[bot]");
+    const { codigo, errores } = await comprobarPR({ ejecuciones: lanzadoPorElBucle("joselcs"), usuarios: PERSONAS });
+    expect(codigo).toBe(1);
+    expect(errores).toContain("El trailer de quien lanzó el harness es una GitHub App, no una persona");
+  });
+});
+
 describe("job trailers del CI", () => {
   const ci = parse(readFileSync(join(RAIZ, ".github", "workflows", "ci.yml"), "utf8")) as {
     jobs: Record<string, { permissions?: Record<string, string>; steps: { uses?: string; with?: Record<string, unknown>; env?: Record<string, string>; run?: string }[] }>;

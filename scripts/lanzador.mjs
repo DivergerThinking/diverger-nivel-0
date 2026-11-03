@@ -78,8 +78,18 @@ export async function quienLanzo({ api, repo, ejecucion, iniciativa, pr }) {
   if (!login || esBot(login)) {
     throw new Error(`La ejecución ${lanzada.id} la lanzó ${login || "nadie"}, que no es una persona`);
   }
-  const persona = await api(`users/${encodeURIComponent(login)}`);
-  return { login, id: persona.id, nombre: nombreSeguro(persona.name, login), ejecucion: lanzada.html_url };
+  return { ...await persona(api, login), ejecucion: lanzada.html_url };
+}
+
+/**
+ * Login, id y nombre de una persona según la API de usuarios de GitHub. Lanza un Error si GitHub no la
+ * conoce o si es una cuenta de GitHub App, que nunca es la persona responsable.
+ */
+export async function persona(api, login) {
+  if (esBot(login)) throw new Error(`${login} es una GitHub App, no una persona`);
+  const usuario = await api(`users/${encodeURIComponent(login)}`);
+  if (usuario.type === "Bot") throw new Error(`${login} es una GitHub App, no una persona`);
+  return { login, id: usuario.id, nombre: nombreSeguro(usuario.name, login) };
 }
 
 /** Cliente mínimo de la API REST de GitHub con el token del job. */

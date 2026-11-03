@@ -5,9 +5,14 @@
 // Para los commits del harness lee la PR de PR_CUERPO (el enlace al job del worker), PR_RAMA
 // (diverger/<iniciativa>/<tarea>) y PR_BASE (su rama base), y pregunta a la API de GitHub con
 // GH_TOKEN (scripts/lanzador.mjs).
+// Excepción (harness#528): en las ramas de mantenimiento del kit de evaluación del harness,
+// diverger/reinicio/<número> y diverger/ajustes/<número>, los commits del harness llevan los cuatro
+// trailers, pero no se comparan con una ejecución del worker: los hacen preparar-nivel-0.yml y
+// ajustes-nivel-0.yml del harness, que es privado, y el CI de la aplicación no puede leer sus ejecuciones.
+// Se comprueba que Diverger-Iniciado-por es una persona (no un bot) y que lleva su Co-authored-by noreply.
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { apiDeGitHub, correoNoreply, esBot, quienLanzo } from "./lanzador.mjs";
+import { apiDeGitHub, correoNoreply, esBot, persona as personaDeGitHub, quienLanzo } from "./lanzador.mjs";
 
 export const TRAILERS = {
   rol: "Diverger-Rol", modelo: "Diverger-Modelo", tarea: "Diverger-Tarea", iniciadoPor: "Diverger-Iniciado-por",
@@ -61,6 +66,9 @@ export function problemas(commit, lanzador) {
   if (!esDelHarness(commit)) return faltan;
   if (!commit.iniciadoPor) {
     faltan.push(`Falta el trailer de quien lanzó el harness (${TRAILERS.iniciadoPor}): ${corto}`);
+  } else if (esBot(commit.iniciadoPor)) {
+    faltan.push(`El trailer de quien lanzó el harness es una GitHub App, no una persona `
+      + `(${TRAILERS.iniciadoPor}: ${commit.iniciadoPor}): ${corto}`);
   } else if (!lanzador || lanzador instanceof Error) {
     faltan.push(`No se puede comprobar quién lanzó la ejecución: ${lanzador?.message ?? "no se sabe"}: ${corto}`);
   } else if (commit.iniciadoPor.toLowerCase() !== lanzador.login.toLowerCase()) {
@@ -85,18 +93,47 @@ export function ramaDelWorker(rama) {
 }
 
 /**
+ * Una rama de mantenimiento del kit de evaluación del harness: diverger/reinicio/<número> (preparar-nivel-0.yml)
+ * o diverger/ajustes/<número> (ajustes-nivel-0.yml), con el número de su ejecución. Solo esas dos formas:
+ * también encajan con ramaDelWorker, así que se decide antes, y el worker no admite esas iniciativas.
+ */
+export function ramaDeMantenimiento(rama) {
+  const partes = /^diverger\/(reinicio|ajustes)\/([0-9]+)$/.exec(rama ?? "");
+  return partes ? { workflow: partes[1], ejecucion: partes[2] } : undefined;
+}
+
+async function intentar(funcion) {
+  try {
+    return await funcion();
+  } catch (error) {
+    return error instanceof Error ? error : new Error(String(error));
+  }
+}
+
+/**
  * Errores de todos los commits del rango. `lanzador()` solo se llama si hay commits del harness, una vez,
  * y devuelve la persona que lanzó la ejecución o lanza un Error con el motivo.
+ *
+ * En una rama de mantenimiento (`usuario`), los commits del harness no se comparan con una ejecución:
+ * `usuario(login)` devuelve la persona de su Diverger-Iniciado-por ({ login, id }) o lanza un Error, y se
+ * comprueba su Co-authored-by con ese id. `lanzador` no se llama.
  */
-export async function comprobar(lista, lanzador) {
-  let persona;
-  if (lista.some(esDelHarness)) {
-    try {
-      persona = await lanzador();
-    } catch (error) {
-      persona = error instanceof Error ? error : new Error(String(error));
+export async function comprobar(lista, lanzador, { usuario } = {}) {
+  if (usuario) {
+    const personas = new Map();
+    const errores = [];
+    for (const commit of lista) {
+      let quien;
+      if (esDelHarness(commit) && commit.iniciadoPor && !esBot(commit.iniciadoPor)) {
+        const clave = commit.iniciadoPor.toLowerCase();
+        if (!personas.has(clave)) personas.set(clave, await intentar(() => usuario(commit.iniciadoPor)));
+        quien = personas.get(clave);
+      }
+      errores.push(...problemas(commit, quien));
     }
+    return errores;
   }
+  const persona = lista.some(esDelHarness) ? await intentar(lanzador) : undefined;
   return lista.flatMap((commit) => problemas(commit, persona));
 }
 
@@ -106,14 +143,25 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     console.error("Uso: node scripts/trailers.mjs <base>..<head>");
     process.exit(2);
   }
+  const api = apiDeGitHub();
+  // La excepción se decide antes que la rama del worker, y solo con la forma exacta de la rama.
+  const mantenimiento = ramaDeMantenimiento(process.env.PR_RAMA) ? {
+    usuario: async (login) => {
+      try {
+        return await personaDeGitHub(api, login);
+      } catch (error) {
+        throw new Error(`no se encuentra a ${login} en GitHub: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+      }
+    },
+  } : {};
   const errores = await comprobar(commits(rango), () => {
     const ejecucion = ejecucionDelCuerpo(process.env.PR_CUERPO);
     if (!ejecucion) throw new Error("la PR no enlaza el job del worker que la abrió");
     const rama = ramaDelWorker(process.env.PR_RAMA);
     if (!rama) throw new Error(`la rama de la PR (${process.env.PR_RAMA ?? ""}) no es la de un worker (diverger/<iniciativa>/<tarea>)`);
-    return quienLanzo({ api: apiDeGitHub(), repo: process.env.GITHUB_REPOSITORY ?? "", ejecucion,
+    return quienLanzo({ api, repo: process.env.GITHUB_REPOSITORY ?? "", ejecucion,
       iniciativa: rama.iniciativa, pr: { tarea: rama.tarea, base: process.env.PR_BASE ?? "" } });
-  });
+  }, mantenimiento);
   for (const error of errores) console.error(error);
   process.exit(errores.length ? 1 : 0);
 }
