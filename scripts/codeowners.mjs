@@ -1,6 +1,6 @@
-// CODEOWNERS sigue protegiendo la configuración del harness (EN-OPS-04, ADR 0014 del harness).
-// Uso en el CI: node scripts/codeowners.mjs [carpeta]. Falla si .diverger/settings.json o el propio
-// CODEOWNERS se quedan sin propietario. Sigue las reglas de GitHub: busca el fichero en .github/, en
+// CODEOWNERS sigue protegiendo la configuración del harness (EN-OPS-04, ADR 0014 del harness) y la suite de
+// aceptación (EN-CAL-01, ADR 0031 del harness). Uso en el CI: node scripts/codeowners.mjs [carpeta]. Falla si
+// .diverger/settings.json, el propio CODEOWNERS o tests/aceptacion/ se quedan sin propietario. Sigue las reglas de GitHub: busca el fichero en .github/, en
 // la raíz y en docs/, por ese orden; gana la última regla que coincide; y una regla sin propietarios
 // deja la ruta sin protección.
 import { existsSync, readFileSync } from "node:fs";
@@ -9,6 +9,9 @@ import { pathToFileURL } from "node:url";
 
 export const UBICACIONES = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"];
 export const CONFIGURACION = ".diverger/settings.json";
+export const SUITE = "tests/aceptacion/";
+// Un fichero cualquiera de la suite: una regla la protege si cubre lo que hay dentro.
+const MUESTRA_DE_LA_SUITE = `${SUITE}historia.feature`;
 const PROPIETARIO = /^(@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\/[A-Za-z0-9._-]+)?|[^@\s]+@[^@\s]+\.[^@\s]+)$/;
 
 /** Patrón y propietarios de cada línea con regla, en orden. */
@@ -68,10 +71,10 @@ export function problemas(raiz = process.cwd()) {
       if (!PROPIETARIO.test(dueno)) errores.push(`${fichero}: «${dueno}» no es un propietario válido (@usuario, @organización/equipo o correo)`);
     }
   }
-  for (const ruta of [CONFIGURACION, fichero]) {
+  for (const [ruta, nombre] of [[CONFIGURACION, CONFIGURACION], [fichero, fichero], [MUESTRA_DE_LA_SUITE, SUITE]]) {
     const duenos = propietarios(lista, ruta);
-    if (duenos === null) errores.push(`${fichero}: ninguna regla cubre ${ruta}; añade «/${ruta} @titular»`);
-    else if (duenos.length === 0) errores.push(`${fichero}: la última regla que cubre ${ruta} no tiene propietarios y la deja sin protección`);
+    if (duenos === null) errores.push(`${fichero}: ninguna regla cubre ${nombre}; añade «/${nombre} @titular»`);
+    else if (duenos.length === 0) errores.push(`${fichero}: la última regla que cubre ${nombre} no tiene propietarios y la deja sin protección`);
   }
   return errores;
 }
