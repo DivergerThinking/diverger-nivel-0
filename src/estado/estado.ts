@@ -8,3 +8,4 @@ export function consultarEstado(formato?: string): Resultado {
   }
   return { codigo: 200, cuerpo: { estado: "en marcha" } };
 }
+
