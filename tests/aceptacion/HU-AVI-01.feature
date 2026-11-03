@@ -1,4 +1,5 @@
 # language: es
+# Prueba de EN-CAL-01: la PR de una tarea toca la suite.
 Característica: HU-AVI-01 Mandar un aviso por correo
 
   Escenario: HU-AVI-01 criterio 1 (positivo)
