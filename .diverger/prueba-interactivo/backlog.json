@@ -40,14 +40,15 @@
           "then": "recibe 400 con {\"error\": \"Formato no admitido\"}"
         }
       ],
-      "priority": "must",
+      "priority": "wont",
       "estimate": {
         "size": "S",
         "hours": 2
       },
       "storyPoints": 2,
       "status": "published",
-      "blockedBy": []
+      "blockedBy": [],
+      "notes": "Prueba del modo interactivo (harness#48): la tarea se construye sin historia para no tocar tests/aceptacion/, que pide la aprobación de otro propietario."
     }
   ],
   "tasks": [],

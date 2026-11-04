@@ -8,9 +8,7 @@
       "name": "Estado",
       "path": "spec/contextos/estado/",
       "module": "src/estado",
-      "stories": [
-        "HU-AVI-02"
-      ],
+      "stories": [],
       "dependsOn": [],
       "contracts": [
         {
