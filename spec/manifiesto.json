@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "initiative": "prueba-interactivo",
+  "status": "approved",
+  "contexts": [
+    {
+      "id": "estado",
+      "name": "Estado",
+      "path": "spec/contextos/estado/",
+      "module": "src/estado",
+      "stories": [],
+      "dependsOn": [],
+      "contracts": [
+        {
+          "kind": "openapi",
+          "path": "spec/contextos/estado/api.openapi.json"
+        }
+      ],
+      "publishes": [],
+      "subscribes": []
+    }
+  ],
+  "approved": {
+    "at": "2026-11-03T16:00:00Z",
+    "contracts": {
+      "spec/contextos/estado/api.openapi.json": "1.0.0"
+    },
+    "lastAdr": 0
+  }
+}
