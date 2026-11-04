@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "HU-AVI-02-estado",
   "title": "Estado: consultar el estado del servicio (GET /api/estado)",
-  "status": "pending",
+  "status": "done",
   "context": "estado",
   "modules": [
     "src/estado"
