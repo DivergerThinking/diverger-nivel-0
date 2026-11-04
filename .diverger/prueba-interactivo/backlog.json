@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "initiative": {
+    "id": "prueba-interactivo",
+    "title": "Prueba del modo interactivo",
+    "language": "es",
+    "vision": "Comprobar de verdad la fase de construcción de /diverger:run en la sesión (harness#48, ADR 0032).",
+    "summary": "Iniciativa de prueba: una tarea independiente que construye un worker interactivo."
+  },
+  "epics": [
+    {
+      "id": "EP-01",
+      "title": "Avisos",
+      "description": "Avisos a quien tiene un equipo prestado."
+    }
+  ],
+  "stories": [
+    {
+      "id": "HU-AVI-02",
+      "epic": "EP-01",
+      "kind": "story",
+      "title": "Consultar el estado del servicio",
+      "role": "técnico de IT",
+      "goal": "saber si el servicio está en marcha",
+      "benefit": "comprobarlo antes de prestar un equipo",
+      "requirements": [
+        "RQ.001"
+      ],
+      "acceptanceCriteria": [
+        {
+          "type": "positive",
+          "given": "el servicio en marcha",
+          "when": "alguien envía GET /api/estado",
+          "then": "recibe 200 con {\"estado\": \"en marcha\"}"
+        },
+        {
+          "type": "negative",
+          "given": "el servicio en marcha",
+          "when": "alguien envía GET /api/estado?formato=xml",
+          "then": "recibe 400 con {\"error\": \"Formato no admitido\"}"
+        }
+      ],
+      "priority": "must",
+      "estimate": {
+        "size": "S",
+        "hours": 2
+      },
+      "storyPoints": 2,
+      "status": "published",
+      "blockedBy": []
+    }
+  ],
+  "tasks": [],
+  "team": [],
+  "sprints": [],
+  "assumptions": [],
+  "openQuestions": []
+}
