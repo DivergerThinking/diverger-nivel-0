@@ -1,6 +1,6 @@
 # diverger-nivel-0
 
-Repo de evaluación del nivel 0 del harness Diverger ExP (préstamo de equipos mínimo). Lo crea EN-S0-01; la aplicación la genera el propio harness. Antes de cada ejecución de evaluación, `preparar-nivel-0.yml` del harness lo deja con solo la plantilla `diverger-golden-path` y la petición fija del nivel 0 en `.diverger/inbox/peticion.md` (EN-GP-06, ADR 0021 del harness). Al terminar, `informe-nivel-0.yml` del harness ejecuta la suite de referencia, que solo está en el harness, contra su staging.
+Repo de evaluación del nivel 0 del harness Diverger ExP (préstamo de equipos mínimo). Lo crea EN-S0-01; la aplicación la genera el propio harness. Antes de cada ejecución de evaluación, `preparar-nivel.yml` del harness (con `nivel: 0`) lo deja con solo la plantilla `diverger-golden-path` y la petición fija del nivel 0 en `.diverger/inbox/peticion.md` (EN-GP-06 y EN-GP-07, ADR 0021 del harness). Al terminar, `informe-nivel.yml` del harness ejecuta la suite de referencia, que solo está en el harness, contra su staging.
 
 - `secretos.yml`: análisis de secretos con gitleaks; un PR con una credencial no se puede integrar.
 - `worker-humo.yml` ya no está aquí: la plantilla no admite un workflow que use la cuenta de despliegue. Para una prueba de humo del entorno, se copia de `infra/entornos/nivel-0/worker-humo.yml` del harness a una rama y se lanza desde ella.
