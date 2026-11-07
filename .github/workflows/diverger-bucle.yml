@@ -25,10 +25,10 @@ on:
         required: true
         type: string
       max-workers:
-        description: Workers a la vez (1 en el nivel 0)
+        description: Workers de código a la vez; vacío, los de maxCodeWorkers en .diverger/settings.json (solo se puede bajar)
         required: false
         type: string
-        default: "1"
+        default: ""
       restart:
         description: Levanta una parada «blocked» o de presupuesto y pone a cero los intentos fallidos
         required: false
@@ -62,7 +62,7 @@ jobs:
         run: |
           fallar() { echo "::error::$1"; exit 1; }
           [[ "$INICIATIVA" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] || fallar "La iniciativa «$INICIATIVA» no es válida"
-          [[ "$MAX_WORKERS" =~ ^[1-9]$ ]] || fallar "max-workers tiene que ser un entero entre 1 y 9"
+          [[ -z "$MAX_WORKERS" || "$MAX_WORKERS" =~ ^[1-3]$ ]] || fallar "max-workers tiene que estar vacío o ser un entero entre 1 y 3"
           [[ "$NUCLEO_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || fallar "DIVERGER_HARNESS_REF no es válida"
       # La rama base, con las credenciales del job (solo lectura) para que el bucle haga git pull.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -121,7 +121,9 @@ jobs:
           LANZADO_POR: ${{ github.actor }}
         run: |
           opciones=(--initiative "$INICIATIVA" --repo "$GITHUB_REPOSITORY" --base "$GITHUB_REF_NAME"
-                    --max-workers "$MAX_WORKERS" --project "$GITHUB_WORKSPACE" --results "$RUNNER_TEMP/resultados.jsonl")
+                    --project "$GITHUB_WORKSPACE" --results "$RUNNER_TEMP/resultados.jsonl")
+          # El límite de workers de código es el del proyecto (maxCodeWorkers, ADR 0035); la entrada solo lo baja.
+          [ -n "$MAX_WORKERS" ] && opciones+=(--max-workers "$MAX_WORKERS")
           [ "$REINICIAR" = "true" ] && opciones+=(--restart)
           [ "$GCP_ARRANQUE" = "success" ] && opciones+=(--log-project "$GCP_PROJECT_ID")
           [[ "$LANZADO_POR" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] && opciones+=(--notify "$LANZADO_POR")

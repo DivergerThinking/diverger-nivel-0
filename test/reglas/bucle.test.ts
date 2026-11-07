@@ -42,8 +42,17 @@ describe("workflow del bucle desatendido", () => {
     const entradas = WF.on.workflow_dispatch.inputs;
     expect(Object.keys(entradas)).toEqual(["initiative", "max-workers", "restart"]);
     expect(entradas.initiative).toMatchObject({ required: true, type: "string" });
-    expect(entradas["max-workers"]?.default).toBe("1");
     expect(WF["run-name"]).toBe("diverger-bucle ${{ inputs.initiative }}");
+  });
+
+  it("sin max-workers, los workers de código son los de maxCodeWorkers del proyecto (harness#695, ADR 0035)", () => {
+    // Con «1» por defecto, el bucle lanzado desde launch_unattended, que solo pasa la iniciativa, iba con un worker.
+    expect(WF.on.workflow_dispatch.inputs["max-workers"]?.default).toBe("");
+    const validar = paso("Validar las entradas").run ?? "";
+    expect(validar).toContain('[[ -z "$MAX_WORKERS" || "$MAX_WORKERS" =~ ^[1-3]$ ]]');
+    const bucle = paso("Bucle").run ?? "";
+    expect(bucle).toContain('[ -n "$MAX_WORKERS" ] && opciones+=(--max-workers "$MAX_WORKERS")');
+    expect(bucle).not.toContain('--max-workers "$MAX_WORKERS" --project');
   });
 
   it("un solo bucle por iniciativa, sin cancelar el que está en marcha", () => {
