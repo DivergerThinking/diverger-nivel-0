@@ -46,6 +46,8 @@ if [ "${#rutas[@]}" -eq 0 ]; then
   echo comentar > "$RUNNER_TEMP/auditor"
   [ -z "${GITHUB_OUTPUT:-}" ] || echo "veredicto=comentar" >> "$GITHUB_OUTPUT"
   echo "Sin src/, web/ ni app/contextos.ts: nada que revisar"
+  # También aquí deja su informe: si no, la PR enseñaría el de un intento anterior como si fuera el último (harness#598).
+  printf '%s\n' "Sin src/, web/ ni app/contextos.ts: nada que revisar." > "$RUNNER_TEMP/auditor-$intento.md"
   sin_coste
   exit 0
 fi
@@ -56,6 +58,8 @@ if [ ! -s "$entrada/cambios.diff" ]; then
   echo comentar > "$RUNNER_TEMP/auditor"
   [ -z "${GITHUB_OUTPUT:-}" ] || echo "veredicto=comentar" >> "$GITHUB_OUTPUT"
   echo "Sin cambios en el código: nada que revisar"
+  # También aquí deja su informe: si no, la PR enseñaría el de un intento anterior como si fuera el último (harness#598).
+  printf '%s\n' "Sin cambios en el código: nada que revisar." > "$RUNNER_TEMP/auditor-$intento.md"
   sin_coste
   exit 0
 fi
