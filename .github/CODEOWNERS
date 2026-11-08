@@ -1,6 +1,21 @@
-# Lo que los agentes no deben cambiar sin el titular (EN-OPS-04, ADR 0014 del harness). El ruleset
-# «codeowners» exige su aprobación en cualquier PR que toque estos ficheros, también en modo yolo.
+# Lo que los agentes no deben cambiar sin una persona (EN-OPS-04, ADR 0014 del harness). Al crear una
+# aplicación desde la plantilla, cambia @joselcs por su titular. El ruleset «codeowners» del harness
+# (infra/github/) exige la aprobación de un propietario en cualquier PR que toque estos ficheros, también
+# en modo yolo; sin ese ruleset, este fichero solo pide la revisión.
 /.diverger/settings.json @joselcs @686f6c61
+# Lo que ejecutan el CI y los workers con sus credenciales, y lo que decide qué se instala y se despliega: el
+# worker solo escribe src/, web/ y app/contextos.ts, y nada más debe cambiar sin una persona (harness#81).
+/.github/ @joselcs
+/scripts/ @joselcs
+/infra/ @joselcs
+/package.json @joselcs
+/package-lock.json @joselcs
+/Dockerfile @joselcs
+# Las instrucciones y la configuración que siguen los agentes (EN-OPS-11, ADR 0019 del harness): un CLAUDE.md en
+# cualquier carpeta, porque Claude Code también carga el de la carpeta en la que trabaja, y todo .claude/
+# (settings.json con los plugins y los permisos, y los agentes, skills y hooks del proyecto).
+CLAUDE.md @joselcs
+/.claude/ @joselcs
 /.github/CODEOWNERS @joselcs @686f6c61
 # La suite de aceptación es el examen de las historias (EN-CAL-01, ADR 0031 del harness): la cambia una
 # persona desde el backlog, nunca la PR de una tarea. Dos propietarios, para que uno apruebe las PR del otro.
