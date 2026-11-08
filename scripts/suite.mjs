@@ -4,7 +4,12 @@
 // del backlog, antes que el código, y la cambia una persona. Una PR es de una tarea si alguno de sus commits
 // lleva el trailer Diverger-Tarea, salvo en las ramas de mantenimiento del kit de evaluación del harness
 // (diverger/reinicio/<número> y diverger/ajustes/<número>, harness#528), que no son tareas: el reinicio borra la
-// suite de la evaluación anterior. La rama llega en PR_RAMA, y el worker rechaza esas dos iniciativas.
+// suite de la evaluación anterior. La rama llega en PR_RAMA, y el worker rechaza esas dos iniciativas. Tampoco es
+// de una tarea la PR del plan de una iniciativa, en plan/<iniciativa> (harness#696): la escribe un agente en la
+// sesión de una persona, con los trailers, y trae la suite que generó generate_features. Tampoco la de la aplicación
+// de un cambio integrado, en cambio/<iniciativa>/C-NNN (harness#35, ADR 0050): /diverger-architect:apply regenera el
+// .feature de las historias construidas que cambia, y la PR la hace un agente en la sesión de una persona. Los workers
+// nunca usan esas ramas: la suya es diverger/<iniciativa>/<tarea>.
 // - Falla si la PR de una tarea cambia, añade, borra o renombra algo de la suite.
 // - En cualquier PR que toque la suite, deja modificada=true en GITHUB_OUTPUT para que el job la etiquete
 //   («suite-modificada»): así se cuenta cada modificación, sea de quien sea.
@@ -25,9 +30,22 @@ export function ficherosDeLaSuite(rango, cwd = process.cwd()) {
   return salida.split("\n").map((linea) => linea.trim()).filter(Boolean);
 }
 
-/** Tareas que nombran los commits (trailer Diverger-Tarea); ninguna en una rama de mantenimiento del harness. */
+/** La rama de la PR del plan de una iniciativa: plan/<iniciativa>, con el nombre en minúsculas y guiones. */
+export function ramaDelPlan(rama) {
+  return /^plan\/[a-z0-9]+(-[a-z0-9]+)*$/.test(rama ?? "");
+}
+
+/** La rama de la PR que aplica un cambio integrado: cambio/<iniciativa>/C-NNN, con tres cifras exactas (ADR 0050). */
+export function ramaDelCambio(rama) {
+  return /^cambio\/[a-z0-9]+(-[a-z0-9]+)*\/C-[0-9]{3}$/.test(rama ?? "");
+}
+
+/**
+ * Tareas que nombran los commits (trailer Diverger-Tarea); ninguna en una rama de mantenimiento, en la del plan ni en
+ * la de la aplicación de un cambio.
+ */
 export function tareas(lista, rama = "") {
-  if (ramaDeMantenimiento(rama)) return [];
+  if (ramaDeMantenimiento(rama) || ramaDelPlan(rama) || ramaDelCambio(rama)) return [];
   const resultado = new Set();
   for (const commit of lista) {
     for (const tarea of (commit.tarea ?? "").split(",").map((t) => t.trim()).filter(Boolean)) resultado.add(tarea);

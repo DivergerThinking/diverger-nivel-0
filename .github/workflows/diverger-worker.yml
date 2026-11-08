@@ -99,6 +99,13 @@ jobs:
       COLLECTOR_IMAGE: us-docker.pkg.dev/cloud-ops-agents-artifacts/google-cloud-opentelemetry-collector/otelcol-google:0.163.1
       # Imagen de las comprobaciones (npm run check), fija por su digest: la misma versión mayor de Node que setup-node.
       IMAGEN_COMPROBACIONES: node:22.23.4-bookworm-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da
+      # Todos los git del job, sin fsmonitor ni hooks del repositorio: esta configuración manda sobre la del worktree,
+      # que el código de las comprobaciones podría haber cambiado (harness#81).
+      GIT_CONFIG_COUNT: "2"
+      GIT_CONFIG_KEY_0: core.fsmonitor
+      GIT_CONFIG_VALUE_0: "false"
+      GIT_CONFIG_KEY_1: core.hooksPath
+      GIT_CONFIG_VALUE_1: /dev/null
     steps:
       # Las entradas llegan de fuera: se comprueban antes de usarlas y nunca se pegan en un script.
       - name: Comprobar las entradas
@@ -118,6 +125,7 @@ jobs:
           echo "FICHERO_TAREA=.diverger/$INICIATIVA/tasks/$TAREA.json" >> "$GITHUB_ENV"
           echo "WORKTREE=$RUNNER_TEMP/worktree" >> "$GITHUB_ENV"
           echo "PLUGIN_DEV=$GITHUB_WORKSPACE/.diverger-dev/plugins/diverger-dev" >> "$GITHUB_ENV"
+          echo "PLUGIN_QUALITY=$GITHUB_WORKSPACE/.diverger-dev/plugins/diverger-quality" >> "$GITHUB_ENV"
 
       # Sin credenciales guardadas en .git: ni el modelo ni lo que deje en el repositorio pueden empujar.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -157,6 +165,20 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
+      # Quién lanzó la ejecución (EN-OPS-06): github.actor de este job o, si lo lanzó el bucle con la identidad del
+      # harness, el del bucle. Lo dice GitHub, no el modelo; el script es el de la rama base. Va antes del modelo para que
+      # su telemetría lo lleve (EN-OPS-07, ADR 0047 del harness), y en las salidas del paso, que ningún otro paso cambia.
+      - name: Quién lanzó la ejecución
+        id: lanzador
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
+          persona=$(node "$GITHUB_WORKSPACE/scripts/lanzador.mjs" "$GITHUB_RUN_ID" "$INICIATIVA" 2>"$RUNNER_TEMP/lanzador") \
+            || fallar "No se sabe quién lanzó la ejecución: $(cat "$RUNNER_TEMP/lanzador")"
+          # El nombre ya viene sin saltos de línea (nombreSeguro de lanzador.mjs).
+          jq -r '"login=\(.login)", "id=\(.id)", "nombre=\(.nombre)"' <<< "$persona" >> "$GITHUB_OUTPUT"
+          echo "Lanzado por @$(jq -r .login <<< "$persona")"
       # La carpeta de Claude Code sale como salida del paso: los pasos con la clave la usan con un PATH fijo.
       - name: Instalar Claude Code
         id: claude
@@ -177,12 +199,13 @@ jobs:
         run: |
           fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
           # Con el usuario del runner: el fichero de credenciales solo lo puede leer él.
-          docker run -d --name otel --user "$(id -u):$(id -g)" -p 4317:4317 -p 13133:13133 \
+          # Solo en localhost: el contenedor de las comprobaciones no llega al Collector (harness#81).
+          docker run -d --name otel --user "$(id -u):$(id -g)" -p 127.0.0.1:4317:4317 -p 127.0.0.1:13133:13133 \
             -e GCP_PROJECT_ID -e GOOGLE_APPLICATION_CREDENTIALS=/credenciales.json \
             -v "$GOOGLE_APPLICATION_CREDENTIALS:/credenciales.json:ro" \
             -v "$PWD/.github/telemetria/collector.yaml:/etc/otelcol/config.yaml:ro" \
             "$COLLECTOR_IMAGE" --config=/etc/otelcol/config.yaml
-          for _ in $(seq 30); do curl -sf localhost:13133 >/dev/null && exit 0; sleep 2; done
+          for _ in $(seq 30); do curl -sf 127.0.0.1:13133 >/dev/null && exit 0; sleep 2; done
           docker logs otel
           fallar "El Collector de la telemetría no arranca"
 
@@ -190,16 +213,19 @@ jobs:
       # repositorio. Cada ejecución lleva sus identificadores para encontrar sus eventos.
       - name: Configuración gestionada
         if: env.TELEMETRIA == 'true'
+        env:
+          LANZADO_POR: ${{ steps.lanzador.outputs.login }}
         run: |
           atributos="github.run_id=$GITHUB_RUN_ID,github.repository=$GITHUB_REPOSITORY,diverger.task=$TAREA,diverger.run=$EJECUCION"
+          atributos+=",diverger.lanzado_por=$LANZADO_POR"
           sudo mkdir -p /etc/claude-code
           jq --arg a "$atributos" '.env.OTEL_RESOURCE_ATTRIBUTES = $a' .github/telemetria/managed-settings.json \
             | sudo tee /etc/claude-code/managed-settings.json >/dev/null
           echo "Telemetría en BigQuery con github.run_id=$GITHUB_RUN_ID"
 
-      # El plugin diverger-dev se descarga del harness, que es privado, con un token de la App que solo
-      # puede leer su contenido. El token se pide y se usa en estos dos pasos, antes del modelo, y no
-      # llega a su entorno; el plugin queda fuera del worktree, donde el modelo no puede escribir.
+      # Los plugins diverger-dev y diverger-quality (el del Auditor de seguridad) se descargan del harness, que es
+      # privado, con un token de la App que solo puede leer su contenido. El token se pide y se usa en estos dos pasos,
+      # antes del modelo, y no llega a su entorno; los plugins quedan fuera del worktree, donde el modelo no puede escribir.
       - name: Token de lectura de diverger-dev
         id: token-dev
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
@@ -216,7 +242,9 @@ jobs:
           token: ${{ steps.token-dev.outputs.token }}
           path: .diverger-dev
           persist-credentials: false
-          sparse-checkout: plugins/diverger-dev
+          sparse-checkout: |
+            plugins/diverger-dev
+            plugins/diverger-quality
 
       # Tres intentos como mucho. En cada uno, el modelo trabaja (worker-modelo.sh) y después el job
       # ejecuta las comprobaciones en otro paso, sin la clave de Anthropic (worker-comprobar.sh). Los
@@ -247,7 +275,11 @@ jobs:
           head -c 12000 "$RUNNER_TEMP/anterior/diagnostico.md" > "$RUNNER_TEMP/diagnostico-anterior.md" 2>/dev/null \
             || { echo "::warning::El job $PREVIO no dejó diagnóstico: el intento $INTENTO_BUCLE sigue sin él"; exit 0; }
           echo "Diagnóstico del job $PREVIO, para el intento $INTENTO_BUCLE:"
+          # Lo escribieron el modelo y su código: sin órdenes de workflow mientras se imprime (harness#81).
+          fin="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+          echo "::stop-commands::$fin"
           cat "$RUNNER_TEMP/diagnostico-anterior.md"
+          echo "::$fin::"
 
       - name: Worker
         id: worker-1
@@ -266,13 +298,32 @@ jobs:
         continue-on-error: true
         timeout-minutes: 15
         run: bash .github/diverger/worker-comprobar.sh 1
+      # El Auditor de seguridad revisa el cambio si las comprobaciones están en verde (HU-CAL-01 del harness, ADR 0040).
+      # Con «bloquear» sale con 1 y se lanza el intento siguiente con su explotación; sin veredicto, la tarea no pasa.
+      - name: Auditor de seguridad
+        id: auditor-1
+        if: steps.comprobaciones-1.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          GASTADO: ${{ steps.worker-1.outputs.coste }}
+          COSTES_AUDITOR: ""
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          TOPE_JOB: ${{ steps.tope.outputs.tope }}
+          CLAUDE_BIN: ${{ steps.claude.outputs.bin }}
+          BASH_ENV: ""
+          ENV: ""
+        working-directory: ${{ env.WORKTREE }}
+        run: bash "$GITHUB_WORKSPACE/.github/diverger/worker-auditor.sh" 1
 
       - name: Worker, intento 2
         id: worker-2
-        if: steps.comprobaciones-1.outcome == 'failure'
+        if: steps.comprobaciones-1.outcome == 'failure' || steps.auditor-1.outputs.veredicto == 'bloquear'
         timeout-minutes: 20
         env:
           GASTADO: ${{ steps.worker-1.outputs.coste }}
+          COSTES_AUDITOR: "${{ steps.auditor-1.outputs.coste }}"
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
           TOPE_JOB: ${{ steps.tope.outputs.tope }}
@@ -283,17 +334,36 @@ jobs:
         run: bash "$GITHUB_WORKSPACE/.github/diverger/worker-modelo.sh" 2
       - name: Comprobaciones, intento 2
         id: comprobaciones-2
-        if: steps.comprobaciones-1.outcome == 'failure'
+        if: steps.comprobaciones-1.outcome == 'failure' || steps.auditor-1.outputs.veredicto == 'bloquear'
         continue-on-error: true
         timeout-minutes: 15
         run: bash .github/diverger/worker-comprobar.sh 2
+      # El Auditor de seguridad revisa el cambio si las comprobaciones están en verde (HU-CAL-01 del harness, ADR 0040).
+      # Con «bloquear» sale con 1 y se lanza el intento siguiente con su explotación; sin veredicto, la tarea no pasa.
+      - name: Auditor de seguridad, intento 2
+        id: auditor-2
+        if: steps.comprobaciones-2.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          GASTADO: ${{ steps.worker-2.outputs.coste }}
+          COSTES_AUDITOR: "${{ steps.auditor-1.outputs.coste }}"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          TOPE_JOB: ${{ steps.tope.outputs.tope }}
+          CLAUDE_BIN: ${{ steps.claude.outputs.bin }}
+          BASH_ENV: ""
+          ENV: ""
+        working-directory: ${{ env.WORKTREE }}
+        run: bash "$GITHUB_WORKSPACE/.github/diverger/worker-auditor.sh" 2
 
       - name: Worker, intento 3
         id: worker-3
-        if: steps.comprobaciones-2.outcome == 'failure'
+        if: steps.comprobaciones-2.outcome == 'failure' || steps.auditor-2.outputs.veredicto == 'bloquear'
         timeout-minutes: 20
         env:
           GASTADO: ${{ steps.worker-2.outputs.coste || steps.worker-1.outputs.coste }}
+          COSTES_AUDITOR: "${{ steps.auditor-1.outputs.coste }} ${{ steps.auditor-2.outputs.coste }}"
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
           TOPE_JOB: ${{ steps.tope.outputs.tope }}
@@ -304,10 +374,28 @@ jobs:
         run: bash "$GITHUB_WORKSPACE/.github/diverger/worker-modelo.sh" 3
       - name: Comprobaciones, intento 3
         id: comprobaciones-3
-        if: steps.comprobaciones-2.outcome == 'failure'
+        if: steps.comprobaciones-2.outcome == 'failure' || steps.auditor-2.outputs.veredicto == 'bloquear'
         continue-on-error: true
         timeout-minutes: 15
         run: bash .github/diverger/worker-comprobar.sh 3
+      # El Auditor de seguridad revisa el cambio si las comprobaciones están en verde (HU-CAL-01 del harness, ADR 0040).
+      # Con «bloquear» sale con 1 y se lanza el intento siguiente con su explotación; sin veredicto, la tarea no pasa.
+      - name: Auditor de seguridad, intento 3
+        id: auditor-3
+        if: steps.comprobaciones-3.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          GASTADO: ${{ steps.worker-3.outputs.coste }}
+          COSTES_AUDITOR: "${{ steps.auditor-1.outputs.coste }} ${{ steps.auditor-2.outputs.coste }}"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          TOPE_JOB: ${{ steps.tope.outputs.tope }}
+          CLAUDE_BIN: ${{ steps.claude.outputs.bin }}
+          BASH_ENV: ""
+          ENV: ""
+        working-directory: ${{ env.WORKTREE }}
+        run: bash "$GITHUB_WORKSPACE/.github/diverger/worker-auditor.sh" 3
 
       # Lo que el job acepta del worker: comprobaciones en verde, algún cambio y ninguno en el plan ni en los
       # workflows. Entonces es el job, no el modelo, quien marca la tarea como hecha. Sin cambios solo se acepta si el
@@ -317,8 +405,14 @@ jobs:
         working-directory: ${{ env.WORKTREE }}
         run: |
           fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
+          # El veredicto del Auditor de seguridad del último intento (worker-modelo.sh lo borra al empezar cada uno).
+          auditor=$(cat "$RUNNER_TEMP/auditor" 2>/dev/null || echo ninguno)
+          [ "$auditor" != bloquear ] \
+            || fallar "El Auditor de seguridad sigue bloqueando el cambio después de 3 intentos: hay un fallo explotable"
           [ "$(cat "$RUNNER_TEMP/comprobaciones" 2>/dev/null)" = verde ] \
             || fallar "Las comprobaciones (npm run check) siguen en rojo después de 3 intentos"
+          [ "$auditor" = comentar ] \
+            || fallar "Sin veredicto del Auditor de seguridad: $(cat "$RUNNER_TEMP/motivo-auditor" 2>/dev/null || echo "no se ha ejecutado")"
           git add -A
           if git diff --cached --quiet; then
             [ -s "$RUNNER_TEMP/cubierta" ] || fallar "El worker no ha cambiado nada"
@@ -326,10 +420,22 @@ jobs:
           fi
           plan=$(git diff --cached --name-only -- .diverger/)
           [ -z "$plan" ] || fallar "El worker ha cambiado el plan: $plan"
-          # La App no tiene permiso Workflows: GitHub rechazaría el push. Se dice aquí, con el motivo.
+          # Solo las rutas que el modelo puede escribir (--allowedTools de worker-modelo.sh). Lo demás solo lo ha
+          # podido cambiar el código de las comprobaciones, y no entra en la PR (harness#81).
           cambiados=$(git diff --cached --name-only)
-          ! grep -q '^\.github/workflows/' <<< "$cambiados" || fallar "El worker ha cambiado .github/workflows/"
-          jq '.status = "done"' "$FICHERO_TAREA" > "$RUNNER_TEMP/tarea.json"
+          fuera=$(grep -Ev '^(src/|web/|app/contextos\.ts$)' <<< "$cambiados" || true)
+          [ -z "$fuera" ] || fallar "El worker ha cambiado rutas fuera de src/, web/ y app/contextos.ts: ${fuera//$'\n'/ }"
+          # Los fallos que el worker corrigió van en la tarea, como hace finish_worker en el modo interactivo
+          # (HU-NUC-20, harness#675): los caracteres de control pasan a espacios, cada frase se recorta a 300
+          # caracteres, sin repetir, y se quedan las tres primeras. Así la sesión de /diverger:run los compara.
+          [ -f "$RUNNER_TEMP/fallos" ] || : > "$RUNNER_TEMP/fallos"
+          jq --rawfile f "$RUNNER_TEMP/fallos" '
+            ([$f | split("\n")[] | sub("^(FALLO|FAILURE):"; "") | gsub("[[:cntrl:]]"; " ") | gsub(" +"; " ")
+              | sub("^ "; "") | sub(" $"; "") | select(length > 0)
+              | if length > 300 then (.[0:299] | sub(" +$"; "")) + "…" else . end]
+              | reduce .[] as $x ([]; if index([$x]) then . else . + [$x] end) | .[0:3]) as $fallos
+            | .status = "done" | if ($fallos | length) > 0 then .failures = $fallos else . end' \
+            "$FICHERO_TAREA" > "$RUNNER_TEMP/tarea.json"
           cp "$RUNNER_TEMP/tarea.json" "$FICHERO_TAREA"
           git add "$FICHERO_TAREA"
           git diff --cached --stat
@@ -352,17 +458,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           APP: ${{ steps.token.outputs.app-slug }}
+          # Del paso «Quién lanzó la ejecución».
+          LANZADO_POR: ${{ steps.lanzador.outputs.login }}
+          LANZADO_POR_ID: ${{ steps.lanzador.outputs.id }}
+          LANZADO_POR_NOMBRE: ${{ steps.lanzador.outputs.nombre }}
         run: |
           fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
           id=$(gh api "users/$APP%5Bbot%5D" -q .id) || fallar "No se encuentra el usuario de la App $APP"
-          # Quién lanzó la ejecución (EN-OPS-06): github.actor de este job o, si lo lanzó el bucle con la
-          # identidad del harness, el del bucle. Lo dice GitHub, no el modelo; el script es el de la rama base.
-          persona=$(node "$GITHUB_WORKSPACE/scripts/lanzador.mjs" "$GITHUB_RUN_ID" "$INICIATIVA" 2>"$RUNNER_TEMP/lanzador") \
-            || fallar "No se sabe quién lanzó la ejecución: $(cat "$RUNNER_TEMP/lanzador")"
-          LANZADO_POR=$(jq -r .login <<< "$persona")
-          LANZADO_POR_ID=$(jq -r .id <<< "$persona")
-          LANZADO_POR_NOMBRE=$(jq -r .nombre <<< "$persona")
-          echo "LANZADO_POR=$LANZADO_POR" >> "$GITHUB_ENV"
           titulo=$(jq -r .title "$FICHERO_TAREA")
           tipo=feat
           [ ! -s "$RUNNER_TEMP/solo-marca" ] || tipo=chore  # Solo marca la tarea (harness#538).
@@ -380,6 +482,7 @@ jobs:
         working-directory: ${{ env.WORKTREE }}
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
+          LANZADO_POR: ${{ steps.lanzador.outputs.login }}
         run: |
           fallar() { printf '%s\n' "$1" > "$RUNNER_TEMP/motivo"; echo "::error::$1"; exit 1; }
           repo="$GITHUB_REPOSITORY"
@@ -405,6 +508,11 @@ jobs:
             jq -rs --arg modelo "$MODELO" \
               '"Coste del worker: \(map(.total_cost_usd // 0) | max) USD en \(map(.num_turns // 0) | add) turnos y \(length) intentos (modelo `\($modelo)`). Comprobaciones (npm run check) en verde."' \
               "$RUNNER_TEMP"/salida-*.json
+            ultimo=$(ls "$RUNNER_TEMP"/auditor-*.md 2>/dev/null | sort | tail -n 1)
+            if [ -n "$ultimo" ]; then
+              echo
+              cat "$ultimo"
+            fi
           } > "$RUNNER_TEMP/pr.md"
           url=$(gh pr create -R "$repo" --base "$GITHUB_REF_NAME" --head "$RAMA" \
             --title "[$TAREA] $titulo" --body-file "$RUNNER_TEMP/pr.md") || fallar "No se ha podido abrir la PR desde $RAMA"
@@ -432,13 +540,18 @@ jobs:
             echo "## Intento $INTENTO_BUCLE del bucle (job $GITHUB_RUN_ID)"
             echo
             echo "**Motivo:** $(cat "$RUNNER_TEMP/motivo" 2>/dev/null || echo "sin motivo; mira el log del job")"
-            ultimo=$(ls "$RUNNER_TEMP"/comprobaciones-*.log 2>/dev/null | sort | tail -n 1)
+            # Sin ningún log (el job paró antes de las comprobaciones), ls falla: no debe tumbar el diagnóstico.
+            ultimo=$(ls "$RUNNER_TEMP"/comprobaciones-*.log 2>/dev/null | sort | tail -n 1 || true)
             if [ -n "$ultimo" ]; then
               echo
               echo "**Final de las últimas comprobaciones (npm run check):**"
               echo '```'
               tail -n 60 "$ultimo"
               echo '```'
+            fi
+            if [ "$(cat "$RUNNER_TEMP/auditor" 2>/dev/null)" = bloquear ]; then
+              echo
+              cat "$(ls "$RUNNER_TEMP"/auditor-*.md | sort | tail -n 1)"
             fi
             if [ -s "$RUNNER_TEMP/salida.json" ]; then
               echo
@@ -459,7 +572,7 @@ jobs:
           retention-days: 30
 
       # El coste para el bucle: también si el job falla o se cancela. Sin artefacto, cuenta el tope entero. Sale de
-      # las salidas de los pasos del modelo, que el código de las comprobaciones no puede cambiar.
+      # las salidas de los pasos del modelo y del Auditor, que el código de las comprobaciones no puede cambiar.
       - name: Coste del job
         if: always()
         env:
@@ -467,6 +580,10 @@ jobs:
             ${{ steps.worker-1.outcome }}:${{ steps.worker-1.outputs.coste }}
             ${{ steps.worker-2.outcome }}:${{ steps.worker-2.outputs.coste }}
             ${{ steps.worker-3.outcome }}:${{ steps.worker-3.outputs.coste }}
+          AUDITORES: >-
+            ${{ steps.auditor-1.outcome }}:${{ steps.auditor-1.outputs.coste }}
+            ${{ steps.auditor-2.outcome }}:${{ steps.auditor-2.outputs.coste }}
+            ${{ steps.auditor-3.outcome }}:${{ steps.auditor-3.outputs.coste }}
         run: bash .github/diverger/worker-coste.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()

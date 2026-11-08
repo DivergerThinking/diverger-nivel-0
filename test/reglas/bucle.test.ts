@@ -10,6 +10,12 @@ import { parse } from "yaml";
 const RAIZ = join(import.meta.dirname, "..", "..");
 const TEXTO = readFileSync(join(RAIZ, ".github", "workflows", "diverger-bucle.yml"), "utf8");
 const SIN_COMENTARIOS = TEXTO.split("\n").filter((linea) => !linea.trimStart().startsWith("#")).join("\n");
+// La comprobación previa (EN-GP-04) es el único paso que recibe el secreto de Anthropic y la variable de la cuenta de
+// despliegue, solo para ver que no están vacíos: el resto del workflow no los nombra.
+const PREVIA = "Comprobación previa del secreto y las variables";
+const INICIO_PREVIA = SIN_COMENTARIOS.indexOf(`      - name: ${PREVIA}\n`);
+const SIN_PREVIA = SIN_COMENTARIOS.slice(0, INICIO_PREVIA)
+  + SIN_COMENTARIOS.slice(SIN_COMENTARIOS.indexOf("\n      - ", INICIO_PREVIA + 1));
 
 interface Paso {
   name?: string;
@@ -18,6 +24,7 @@ interface Paso {
   run?: string;
   env?: Record<string, string>;
   with?: Record<string, string | boolean>;
+  "continue-on-error"?: boolean;
 }
 
 const WF = parse(TEXTO) as {
@@ -62,8 +69,9 @@ describe("workflow del bucle desatendido", () => {
   it("el token del job es de solo lectura y GCP solo con la cuenta de telemetría", () => {
     expect(WF.permissions).toEqual({ contents: "read" });
     expect(JOB.permissions).toEqual({ contents: "read", "id-token": "write" });
-    expect(SIN_COMENTARIOS).not.toMatch(/GCP_DEPLOY_SA|environment:/);
-    const auth = PASOS.filter((p) => p.uses?.startsWith("google-github-actions/auth@"));
+    expect(INICIO_PREVIA).toBeGreaterThan(0);
+    expect(SIN_PREVIA).not.toMatch(/GCP_DEPLOY_SA|environment:/);
+    const auth = PASOS.filter((p) => p.uses?.startsWith("google-github-actions/auth@") && p.id !== "previa-gcp");
     // Uno para el arranque y otro al terminar: el bucle puede durar más que el token (harness#536).
     expect(auth).toHaveLength(2);
     for (const paso of auth) {
@@ -81,7 +89,7 @@ describe("workflow del bucle desatendido", () => {
     expect(auth).toBeLessThan(registro);
     expect(paso("Bucle").run).toContain('--results "$RUNNER_TEMP/resultados.jsonl"');
     const registrar = PASOS[registro] as Paso & { if?: string; "continue-on-error"?: boolean };
-    expect(registrar.if).toBe("always() && env.TELEMETRIA == 'true'");
+    expect(registrar.if).toBe("always() && env.TELEMETRIA == 'true' && steps.estado.outcome == 'success'");
     expect(registrar["continue-on-error"]).toBe(true);
     expect(registrar.run).toContain("gcloud logging write diverger-ejecucion \"$linea\" --payload-type=json");
     // gcloud solo escribe ese log: nada de despliegues ni de lecturas de GCP.
@@ -95,7 +103,8 @@ describe("workflow del bucle desatendido", () => {
   });
 
   it("no ejecuta ningún modelo", () => {
-    expect(SIN_COMENTARIOS).not.toMatch(/claude|ANTHROPIC_API_KEY|anthropic/i);
+    expect(SIN_PREVIA).not.toMatch(/claude|ANTHROPIC_API_KEY|anthropic/i);
+    expect(paso(PREVIA).run).toBe("bash .github/diverger/bucle-previa.sh secreto-y-variables");
   });
 
   it("valida las entradas antes de usarlas y nunca las pega en un script", () => {

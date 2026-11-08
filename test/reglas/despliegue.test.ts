@@ -130,7 +130,13 @@ describe("los workers no pueden desplegar", () => {
   });
 
   it("solo los jobs del environment staging usan la cuenta de despliegue", () => {
-    const conCuenta = todos.filter(({ cuerpo }) => cuerpo.includes("GCP_DEPLOY_SA"));
+    // La comprobación previa del bucle (EN-GP-04) mira que la variable no está vacía: es la única vez que la nombra, en el
+    // env de ese paso, y ningún paso del bucle entra en GCP con ella.
+    const LINEA_PREVIA = "          GCP_DEPLOY_SA: ${{ vars.GCP_DEPLOY_SA }}\n";
+    const bucle = todos.find(({ nombre, job }) => nombre === "diverger-bucle.yml" && job === "bucle");
+    expect(bucle?.cuerpo.split("GCP_DEPLOY_SA")).toHaveLength(3);
+    expect(bucle?.cuerpo).toContain(LINEA_PREVIA);
+    const conCuenta = todos.filter(({ cuerpo }) => cuerpo.replace(LINEA_PREVIA, "").includes("GCP_DEPLOY_SA"));
     expect(conCuenta.map(({ job }) => job)).toEqual(["despliegue"]);
     for (const { nombre, job, cuerpo } of conCuenta) {
       expect(cuerpo, `${nombre}/${job}`).toMatch(/^ {4}environment:\n {6}name: staging$/m);

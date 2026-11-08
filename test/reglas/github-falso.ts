@@ -1,5 +1,5 @@
 // API de GitHub de mentira para las pruebas de quién lanzó una ejecución (EN-OPS-06): las ejecuciones
-// de Actions y los usuarios, en un servidor HTTP local al que apunta GITHUB_API_URL.
+// de Actions, los usuarios y la descripción de las PR (EN-OPS-07), en un servidor HTTP local al que apunta GITHUB_API_URL.
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -19,6 +19,8 @@ export interface Ejecucion {
 export interface Datos {
   ejecuciones: Ejecucion[];
   usuarios: Record<string, { id: number; name: string | null }>;
+  /** Las PR por número, con su descripción actual (EN-OPS-07). */
+  prs?: Record<string, { body: string | null }>;
 }
 
 export const REPO = "DivergerThinking/app-de-prueba";
@@ -54,6 +56,8 @@ function responder(datos: Datos, url: URL): unknown {
     return { workflow_runs: datos.ejecuciones.filter((e) => e.path.endsWith("diverger-bucle.yml")
       && (Number.isNaN(hasta) || Date.parse(e.created_at) <= hasta)) };
   }
+  const pr = new RegExp(`^/repos/${REPO}/pulls/([0-9]+)$`).exec(url.pathname);
+  if (pr) return datos.prs?.[pr[1] ?? ""];
   const usuario = /^\/users\/([^/]+)$/.exec(url.pathname);
   if (!usuario) return undefined;
   const login = decodeURIComponent(usuario[1] ?? "");
