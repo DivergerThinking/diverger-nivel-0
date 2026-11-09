@@ -19,8 +19,17 @@ export interface Ejecucion {
 export interface Datos {
   ejecuciones: Ejecucion[];
   usuarios: Record<string, { id: number; name: string | null }>;
-  /** Las PR por número, con su descripción actual (EN-OPS-07). */
-  prs?: Record<string, { body: string | null }>;
+  /** El permiso de cada persona en el repositorio (EN-OPS-10): sin él, la API responde 404. */
+  permisos?: Record<string, string>;
+  /** Las reglas de la rama main, como las da /rules/branches/main (EN-OPS-10). */
+  reglas?: unknown[];
+  /** Las PR por número, con su descripción actual (EN-OPS-07) y, para la política «otra persona» (EN-OPS-10), sus
+   * commits y sus revisiones. */
+  prs?: Record<string, { body: string | null; user?: { login: string; type?: string }; head?: { sha: string };
+    /** Cuántos commits tiene, como lo da la API, y la lista que devuelve /commits. */
+    commits?: number; listaDeCommits?: { commit: { message: string }; author?: { login: string; type?: string } | null;
+      committer?: { login: string; type?: string } | null }[];
+    reviews?: { user: { login: string; type?: string }; state: string; commit_id?: string; author_association?: string }[] }>;
 }
 
 export const REPO = "DivergerThinking/app-de-prueba";
@@ -58,6 +67,20 @@ function responder(datos: Datos, url: URL): unknown {
   }
   const pr = new RegExp(`^/repos/${REPO}/pulls/([0-9]+)$`).exec(url.pathname);
   if (pr) return datos.prs?.[pr[1] ?? ""];
+  if (url.pathname === `/repos/${REPO}/rules/branches/main`) return datos.reglas ?? [];
+  const permiso = new RegExp(`^/repos/${REPO}/collaborators/([^/]+)/permission$`).exec(url.pathname);
+  if (permiso) {
+    const nivel = datos.permisos?.[decodeURIComponent(permiso[1] ?? "")];
+    return nivel ? { permission: nivel } : undefined;
+  }
+  // Listas paginadas de 100: la página 2 y siguientes, vacías si caben en una.
+  const lista = new RegExp(`^/repos/${REPO}/pulls/([0-9]+)/(commits|reviews)$`).exec(url.pathname);
+  if (lista) {
+    const pr = datos.prs?.[lista[1] ?? ""];
+    const todos = lista[2] === "commits" ? pr?.listaDeCommits : pr?.reviews;
+    const pagina = Number(url.searchParams.get("page") ?? "1");
+    return todos ? todos.slice((pagina - 1) * 100, pagina * 100) : undefined;
+  }
   const usuario = /^\/users\/([^/]+)$/.exec(url.pathname);
   if (!usuario) return undefined;
   const login = decodeURIComponent(usuario[1] ?? "");

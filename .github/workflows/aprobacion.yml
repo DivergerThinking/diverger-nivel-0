@@ -1,0 +1,43 @@
+name: aprobacion
+
+# Política «otra persona» (EN-OPS-10 del harness, ADR 0008 del harness): la PR del harness la aprueba una persona
+# distinta de quien lo lanzó. Va en un workflow propio y no en ci.yml porque tiene que volver a correr cada vez que
+# alguien aprueba o retira una aprobación, y ci.yml no se lanza con las revisiones. El job se llama otra-persona, y el
+# ruleset «aprobacion» lo exige solo con esa política (aplicar-politica.sh del harness). El script mira esas reglas:
+# si no lo exigen, pasa sin más.
+# Lo que no cubre: GitHub corre este workflow tal como está en la PR, al abrirla y con cada revisión, así que una PR
+# que lo cambie podría saltárselo. Los agentes del harness no pueden tocar .github/, y CODEOWNERS pide un propietario
+# para cambiarlo (ADR 0008 y DEUDA.md del harness).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions:
+  contents: read
+
+# Una sola comprobación a la vez por PR: si una aprobación y su retirada llegan seguidas, vale la última.
+concurrency:
+  group: aprobacion-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  otra-persona:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # Para leer los commits y las revisiones de la PR.
+    steps:
+      # El script es el de la rama base: una PR no puede cambiar el script que la juzga.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Aprueba otra persona
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMERO: ${{ github.event.pull_request.number }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+        run: node scripts/aprobacion.mjs

@@ -1,7 +1,9 @@
 // Infraestructura como código (EN-GP-03): lo que se puede comprobar leyendo infra/ sin OpenTofu
 // ni GCP. El plan con el proveedor simulado lo prueban tofu test y terraform test en el job
 // infraestructura del CI.
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -124,5 +126,156 @@ describe("infraestructura como código", () => {
 
   it("el bloque backend está vacío: el bucket y el prefijo van en staging.gcs.tfbackend", () => {
     expect(tf.match(/backend "[a-z]+"\s*\{[^}]*\}/g)).toEqual(['backend "gcs" {}']);
+  });
+});
+
+const SCRIPT_IAM = join(RAIZ, "scripts", "iam.mjs");
+const SERVICE_ACCOUNT_USER = "serviceAccountUser debe concederse solo sobre la cuenta de ejecución, no a nivel de proyecto";
+const ROL_BASICO = "los roles básicos (Editor, Owner, Viewer) no se conceden en la infraestructura del proyecto";
+const POLITICA = "las políticas completas de IAM (google_*_iam_policy) no se usan: sustituyen la política entera";
+const NO_LITERAL = 'el rol tiene que ser una cadena literal, como "roles/datastore.user", para poder comprobarlo';
+const TF_JSON = "la infraestructura va en ficheros .tf o .tofu, no .tf.json ni .tofu.json, para que se pueda revisar";
+
+/** node scripts/iam.mjs sobre una carpeta con este fichero: el código y los errores, uno por línea. */
+function iam(tf: string, nombre = "main.tf"): { codigo: number | null; errores: string[] } {
+  const carpeta = mkdtempSync(join(tmpdir(), "iam-"));
+  try {
+    writeFileSync(join(carpeta, nombre), tf);
+    const r = spawnSync(process.execPath, [SCRIPT_IAM, carpeta], { encoding: "utf8" });
+    const errores = r.stderr.split("\n").filter(Boolean).map((l) => l.replace(/^::error file=[^:]*::.*?\.(tf|tofu)(\.json)?: /, ""));
+    return { codigo: r.status, errores };
+  } finally {
+    rmSync(carpeta, { recursive: true, force: true });
+  }
+}
+
+describe("mínimo privilegio en GCP (EN-GP-05 del harness)", () => {
+  it("la infraestructura de la plantilla no concede serviceAccountUser a nivel de proyecto ni roles básicos", () => {
+    const r = spawnSync(process.execPath, [SCRIPT_IAM, INFRA], { encoding: "utf8" });
+    expect(r.status, r.stderr).toBe(0);
+  });
+
+  it("serviceAccountUser a nivel de proyecto falla con el mensaje del criterio", () => {
+    const malo = `resource "google_project_iam_member" "desplegar" {
+  project = var.proyecto
+  role    = "roles/iam.serviceAccountUser"
+  member  = "serviceAccount:\${var.cuenta_despliegue}"
+}`;
+    expect(iam(malo)).toEqual({ codigo: 1, errores: [`google_project_iam_member.desplegar: ${SERVICE_ACCOUNT_USER}`] });
+    for (const tipo of ["google_project_iam_binding", "google_folder_iam_member", "google_organization_iam_binding"]) {
+      expect(iam(malo.replace("google_project_iam_member", tipo)).errores).toHaveLength(1);
+    }
+  });
+
+  it("serviceAccountUser sobre la cuenta de ejecución sí vale", () => {
+    const bueno = `resource "google_service_account_iam_member" "desplegar_como_ejecucion" {
+  service_account_id = "projects/\${var.proyecto}/serviceAccounts/\${var.cuenta_ejecucion}"
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:\${var.cuenta_despliegue}"
+}`;
+    expect(iam(bueno)).toEqual({ codigo: 0, errores: [] });
+  });
+
+  it("los roles básicos a nivel de proyecto fallan, y uno en un comentario no cuenta", () => {
+    const editor = `resource "google_project_iam_member" "todo" {
+  # role = "roles/iam.serviceAccountUser" es lo que no hay que hacer
+  /* role = "roles/owner" tampoco */
+  project     = var.proyecto
+  role        = "roles/editor"
+  member      = "serviceAccount:x@y.iam.gserviceaccount.com"
+  description = "con } dentro"
+}
+resource "google_project_iam_member" "siguiente" {
+  role = "roles/owner"
+}`;
+    expect(iam(editor)).toEqual({ codigo: 1, errores: [`google_project_iam_member.todo: ${ROL_BASICO}`,
+      `google_project_iam_member.siguiente: ${ROL_BASICO}`] });
+  });
+
+  it("no se lo salta un rol fuera del recurso: locals, for_each, una política con data o un heredoc (revisión de la PR #62)", () => {
+    const locals = `locals {
+  rol = "roles/iam.serviceAccountUser"
+}
+resource "google_project_iam_member" "x" {
+  role = local.rol
+}`;
+    expect(iam(locals)).toEqual({ codigo: 1, errores: [`google_project_iam_member.x: ${NO_LITERAL}`,
+      `fuera de un recurso: ${SERVICE_ACCOUNT_USER}`] });
+    const bucle = `resource "google_project_iam_member" "x" {
+  for_each = toset(["roles/iam.serviceAccountUser", "roles/editor"])
+  role     = each.value
+}`;
+    expect(iam(bucle).errores).toEqual([`google_project_iam_member.x: ${NO_LITERAL}`,
+      `google_project_iam_member.x: ${SERVICE_ACCOUNT_USER}`, `google_project_iam_member.x: ${ROL_BASICO}`]);
+    const politica = `data "google_iam_policy" "p" {
+  binding {
+    role    = "roles/iam.serviceAccountUser"
+    members = ["serviceAccount:x@y.iam.gserviceaccount.com"]
+  }
+}
+resource "google_project_iam_policy" "p" {
+  project     = var.proyecto
+  policy_data = data.google_iam_policy.p.policy_data
+}`;
+    expect(iam(politica).errores).toEqual([`google_project_iam_policy.p: ${POLITICA}`,
+      `fuera de un recurso: ${SERVICE_ACCOUNT_USER}`]);
+    const heredoc = `resource "terraform_data" "ayuda" {
+  input = <<EOT
+una llave { y una comilla " sin cerrar
+EOT
+}
+resource google_project_iam_member todo {
+  role = "roles/owner"
+}`;
+    expect(iam(heredoc).errores).toEqual([`google_project_iam_member.todo: ${ROL_BASICO}`]);
+  });
+
+  it("un .tf.json o un .tofu.json no vale, y un .tofu se revisa como un .tf", () => {
+    expect(iam("{}", "main.tf.json")).toEqual({ codigo: 1, errores: [TF_JSON] });
+    expect(iam("{}", "main.tofu.json")).toEqual({ codigo: 1, errores: [TF_JSON] });
+    expect(iam(`resource "google_project_iam_member" "x" {
+  role = "roles/owner"
+}`, "main.tofu").errores).toEqual([`google_project_iam_member.x: ${ROL_BASICO}`]);
+  });
+
+  it("un rol construido no vale, y una interpolación con comillas y llaves no descuadra los bloques (revisión de seguridad)", () => {
+    const construido = `resource "google_project_iam_member" "x" {
+  role = "roles/\${"edit"}or"
+}`;
+    expect(iam(construido).errores).toEqual([`google_project_iam_member.x: ${NO_LITERAL}`]);
+    // La cadena con "}" dentro de la interpolación no cierra el recurso permitido: el de proyecto sigue fuera de él.
+    const interpolacion = `resource "google_service_account_iam_member" "ok" {
+  service_account_id = "\${replace("a}b", "}", "")}"
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:x@y.iam.gserviceaccount.com"
+}
+resource "google_project_iam_member" "malo" {
+  role = "roles/iam.serviceAccountUser"
+}`;
+    expect(iam(interpolacion).errores).toEqual([`google_project_iam_member.malo: ${SERVICE_ACCOUNT_USER}`]);
+    // $${ y %%{ son llaves escapadas, no interpolaciones: no se tragan la comilla de cierre.
+    const escapada = `resource "google_service_account_iam_member" "ok" {
+  service_account_id = "$\${"
+  role               = "roles/iam.serviceAccountUser"
+}
+resource "google_project_iam_member" "malo" {
+  role = "roles/iam.serviceAccountUser"
+}`;
+    expect(iam(escapada).errores).toEqual([`google_project_iam_member.malo: ${SERVICE_ACCOUNT_USER}`]);
+  });
+
+  it("si una cadena o un bloque no se cierra, falla en vez de fiarse de lo leído", () => {
+    for (const tf of ['resource "google_project_iam_member" "x" {\n  role = "roles/owner', 'resource "a" "b" {\n',
+      'locals {\n  x = "${"\n}\n']) {
+      expect(iam(tf)).toEqual({ codigo: 1, errores: ["no se puede leer: una cadena, un heredoc o un bloque no se cierra"] });
+    }
+  });
+
+  it("el CI lo comprueba en el job infraestructura, desde la raíz", () => {
+    const ci = leer(".github/workflows/ci.yml");
+    const paso = ci.split(/\n(?=\s+- (?:name|uses):)/).find((p) => p.includes("Mínimo privilegio en GCP")) ?? "";
+    expect(paso).toContain("working-directory: .");
+    expect(paso).toContain("run: node scripts/iam.mjs infra");
+    expect(ci.indexOf("Mínimo privilegio en GCP")).toBeGreaterThan(ci.indexOf("  infraestructura:"));
   });
 });

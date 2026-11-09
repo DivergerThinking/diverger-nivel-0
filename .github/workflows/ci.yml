@@ -202,6 +202,10 @@ jobs:
           echo "${TOFU_SHA256}  $f" | sha256sum -c -
           unzip -q "$f" tofu
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      # EN-GP-05 del harness: ni serviceAccountUser a nivel de proyecto ni roles básicos (scripts/iam.mjs).
+      - name: Mínimo privilegio en GCP
+        working-directory: .
+        run: node scripts/iam.mjs infra
       - name: Formato
         run: tofu fmt -check -recursive -diff
       - name: Iniciar sin estado remoto
