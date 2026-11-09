@@ -9,7 +9,9 @@
 // roles/iam.serviceAccountUser o de un rol básico fuera de un google_service_account_iam_* es un error, esté en un
 // recurso, en locals, en una variable, en un for_each o en un heredoc. Las políticas completas
 // (google_*_iam_policy) no se usan: sustituyen la política entera del proyecto. Y la infraestructura va en .tf, no en
-// .tf.json, que esto no revisa; los .tofu de OpenTofu se revisan como los .tf. El rol de un recurso de IAM del proyecto
+// .tf.json, que esto no revisa; los .tofu de OpenTofu se revisan como los .tf, y los .tfvars se buscan enteros. Los
+// módulos solo pueden ser locales, sin «..», aunque la ruta siguiera dentro de la carpeta, y un .tfvars no puede nombrar
+// serviceAccountUser ni para un recurso de una cuenta de servicio: se pone en el .tf. El rol de un recurso de IAM del proyecto
 // tiene que ser una cadena literal. Se quitan los comentarios antes de buscar.
 // Uso en el CI: node scripts/iam.mjs [carpeta], por defecto infra. Falla con un error por cada problema.
 import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
@@ -20,7 +22,8 @@ export const SERVICE_ACCOUNT_USER =
   "serviceAccountUser debe concederse solo sobre la cuenta de ejecución, no a nivel de proyecto";
 export const ROL_BASICO = "los roles básicos (Editor, Owner, Viewer) no se conceden en la infraestructura del proyecto";
 export const POLITICA = "las políticas completas de IAM (google_*_iam_policy) no se usan: sustituyen la política entera";
-export const ILEGIBLE = "no se puede leer: una cadena, un heredoc o un bloque no se cierra";
+export const MODULO = "los módulos solo pueden ser locales, con source = \"./…\", para que se revisen con lo demás";
+export const ILEGIBLE = "no se puede leer: una cadena, un heredoc o un bloque no se cierra, o una cabecera resource o module no se entiende";
 export const TF_JSON = "la infraestructura va en ficheros .tf o .tofu, no .tf.json ni .tofu.json, para que se pueda revisar";
 
 const SAU = /roles\/iam\.serviceAccountUser/i;
@@ -105,13 +108,27 @@ function finDelBloque(texto, desde) {
 
 /** Los bloques resource de un texto HCL ya sin comentarios: tipo, nombre, inicio y fin. Las etiquetas pueden ir sin
  * comillas, como admiten OpenTofu y Terraform. */
+// Una etiqueta de bloque: un identificador, que en HCL admite cualquier letra Unicode, con comillas o sin ellas. Una
+// entre comillas con otra cosa, como un escape \u005f que OpenTofu convierte en _, no se reconoce: la cabecera no se
+// entiende y el fichero falla (revisión de seguridad de la PR #64).
+const ETIQUETA = String.raw`("[\p{L}\p{N}_-]+"|[\p{L}\p{N}_-]+)`;
+const sinComillas = (etiqueta) => etiqueta.replace(/^"|"$/g, "");
+// Las cabeceras empiezan línea, como manda HCL: así una que esté a mitad de línea, dentro de una cadena, no cuenta.
+const MODULO_CABECERA = new RegExp(String.raw`^[ \t]*module(?=[\s"])\s*${ETIQUETA}\s*\{`, "gmu");
+// Cualquier cabecera de bloque resource o module que no sea un atributo.
+const CABECERA = /^[ \t]*(?:resource|module)(?![\p{L}\p{N}_-])(?![ \t]*=)/gmu;
+// Dónde empieza la palabra resource o module de una coincidencia.
+const palabra = (m) => m.index + m[0].search(/resource|module/);
+
 export function recursos(texto) {
   const encontrados = [];
-  const inicio = /\bresource\s+"?([\w-]+)"?\s+"?([\w-]+)"?\s*\{/g;
+  // OpenTofu no exige espacios entre las palabras de la cabecera: resource"a""b"{ también vale (revisión de la PR #64).
+  const inicio = new RegExp(String.raw`^[ \t]*resource(?=[\s"])\s*${ETIQUETA}\s*${ETIQUETA}\s*\{`, "gmu");
   let coincidencia;
   while ((coincidencia = inicio.exec(texto))) {
     const fin = finDelBloque(texto, inicio.lastIndex);
-    encontrados.push({ tipo: coincidencia[1], nombre: coincidencia[2], inicio: coincidencia.index, fin });
+    encontrados.push({ tipo: sinComillas(coincidencia[1]), nombre: sinComillas(coincidencia[2]), inicio: palabra(coincidencia),
+      fin });
     inicio.lastIndex = fin;
   }
   return encontrados;
@@ -140,7 +157,26 @@ export function revisar(original) {
   const bloques = recursos(texto);
   // Si el lector no consigue cerrar algo, no se fía de lo que ha leído: falla (revisión de seguridad de la PR #62).
   if (bloques.some((b) => b.fin >= texto.length) || !equilibrado(texto)) return [ILEGIBLE];
+  // Y si hay una cabecera resource o module que el lector no ha sabido leer, tampoco (revisión de seguridad de la PR #64).
+  const modulos = [...texto.matchAll(MODULO_CABECERA)];
+  // Se comparan las posiciones, no cuántas hay: con el número, una de más en un sitio taparía una de menos en otro.
+  const leidas = [...bloques.map((b) => b.inicio), ...modulos.map(palabra)].sort((a, b) => a - b).join();
+  const todas = [...texto.matchAll(CABECERA)].map(palabra).sort((a, b) => a - b).join();
+  if (leidas !== todas) return [ILEGIBLE];
   const errores = [];
+  // Un módulo remoto, o de fuera de la carpeta, trae recursos que esto no lee (revisión de seguridad de la PR #63).
+  for (const modulo of modulos) {
+    const cuerpo = texto.slice(modulo.index, finDelBloque(texto, modulo.index + modulo[0].length) + 1);
+    // Un solo source, literal, local, sin salir de la carpeta ni entrar en una .terraform, que no se revisa.
+    // El atributo empieza línea (my-source no cuenta), y su valor es una cadena sola: ni paréntesis, ni heredoc, ni nada
+    // detrás. Cualquier otra forma, o más de un source en el bloque, no vale (revisión de seguridad de la PR #64).
+    const origenes = [...cuerpo.matchAll(/(?:^|\n|\{)[ \t]*source[ \t]*=([^\n}]*)/g)].map((m) => m[1].trim());
+    const literal = origenes.length === 1 ? /^"([^"\\$%]*)"$/.exec(origenes[0]) : null;
+    const origen = literal?.[1] ?? "";
+    const local = /^\.\/[\w./-]*$/.test(origen)
+      && !origen.split("/").some((parte) => parte === ".." || parte === ".terraform");
+    if (!local) errores.push(`module.${sinComillas(modulo[1])}: ${MODULO}`);
+  }
   for (const { tipo, nombre, inicio, fin } of bloques) {
     if (POLITICA_COMPLETA.test(tipo)) errores.push(`${tipo}.${nombre}: ${POLITICA}`);
     if (DE_PROYECTO.test(tipo)) {
@@ -170,11 +206,13 @@ export function revisar(original) {
   return errores;
 }
 
-function ficheros(carpeta) {
+// Solo se salta la caché de OpenTofu de la carpeta revisada: una carpeta .terraform más abajo podría esconder .tf
+// (revisión de seguridad de la PR #63).
+function ficheros(carpeta, raiz = carpeta) {
   return readdirSync(carpeta).flatMap((nombre) => {
     const ruta = join(carpeta, nombre);
-    if (nombre === ".terraform") return [];
-    return statSync(ruta).isDirectory() ? ficheros(ruta) : [ruta];
+    if (nombre === ".terraform" && carpeta === raiz) return [];
+    return statSync(ruta).isDirectory() ? ficheros(ruta, raiz) : [ruta];
   });
 }
 
@@ -185,12 +223,21 @@ if (import.meta.url === lanzado) {
   const errores = [];
   for (const ruta of ficheros(carpeta)) {
     const visible = relative(".", ruta);
-    if (ruta.endsWith(".tf.json") || ruta.endsWith(".tofu.json")) errores.push([visible, TF_JSON]);
-    else if (ruta.endsWith(".tf") || ruta.endsWith(".tofu")) {
+    if (ruta.endsWith(".tf.json") || ruta.endsWith(".tofu.json") || ruta.endsWith(".tfvars.json")) {
+      errores.push([visible, TF_JSON]);
+    } else if (ruta.endsWith(".tf") || ruta.endsWith(".tofu")) {
       for (const error of revisar(readFileSync(ruta, "utf8"))) errores.push([visible, error]);
+    } else if (ruta.endsWith(".tfvars")) {
+      // Una variable puede llevar el rol: aquí no hay recursos, así que cualquier aparición cuenta.
+      const texto = sinComentarios(readFileSync(ruta, "utf8"));
+      if (SAU.test(texto)) errores.push([visible, `fuera de un recurso: ${SERVICE_ACCOUNT_USER}`]);
+      if (BASICO.test(texto)) errores.push([visible, `fuera de un recurso: ${ROL_BASICO}`]);
     }
   }
-  for (const [fichero, error] of errores) console.error(`::error file=${fichero}::${fichero}: ${error}`);
+  // Lo que va en un comando de GitHub Actions se escapa, para que un nombre de fichero no cambie el comando.
+  const escapar = (texto) => texto.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+  const propiedad = (texto) => escapar(texto).replace(/:/g, "%3A").replace(/,/g, "%2C");
+  for (const [fichero, error] of errores) console.error(`::error file=${propiedad(fichero)}::${escapar(`${fichero}: ${error}`)}`);
   if (errores.length) process.exit(1);
   console.log(`IAM de ${carpeta}: sin serviceAccountUser a nivel de proyecto, roles básicos ni políticas completas`);
 }

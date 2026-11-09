@@ -2,7 +2,7 @@
 // ni GCP. El plan con el proveedor simulado lo prueban tofu test y terraform test en el job
 // infraestructura del CI.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -131,6 +131,7 @@ describe("infraestructura como código", () => {
 
 const SCRIPT_IAM = join(RAIZ, "scripts", "iam.mjs");
 const SERVICE_ACCOUNT_USER = "serviceAccountUser debe concederse solo sobre la cuenta de ejecución, no a nivel de proyecto";
+const ILEGIBLE = "no se puede leer: una cadena, un heredoc o un bloque no se cierra, o una cabecera resource o module no se entiende";
 const ROL_BASICO = "los roles básicos (Editor, Owner, Viewer) no se conceden en la infraestructura del proyecto";
 const POLITICA = "las políticas completas de IAM (google_*_iam_policy) no se usan: sustituyen la política entera";
 const NO_LITERAL = 'el rol tiene que ser una cadena literal, como "roles/datastore.user", para poder comprobarlo';
@@ -142,7 +143,7 @@ function iam(tf: string, nombre = "main.tf"): { codigo: number | null; errores: 
   try {
     writeFileSync(join(carpeta, nombre), tf);
     const r = spawnSync(process.execPath, [SCRIPT_IAM, carpeta], { encoding: "utf8" });
-    const errores = r.stderr.split("\n").filter(Boolean).map((l) => l.replace(/^::error file=[^:]*::.*?\.(tf|tofu)(\.json)?: /, ""));
+    const errores = r.stderr.split("\n").filter(Boolean).map((l) => l.replace(/^::error file=[^:]*::.*?\.(tf|tofu|tfvars)(\.json)?: /, ""));
     return { codigo: r.status, errores };
   } finally {
     rmSync(carpeta, { recursive: true, force: true });
@@ -264,10 +265,66 @@ resource "google_project_iam_member" "malo" {
     expect(iam(escapada).errores).toEqual([`google_project_iam_member.malo: ${SERVICE_ACCOUNT_USER}`]);
   });
 
+  it("un módulo remoto o de fuera de la carpeta no vale, y uno local sí (revisión de seguridad)", () => {
+    for (const origen of ["terraform-google-modules/iam/google", "git::https://x/y.git", "../fuera", "./a/../../fuera",
+      "./.terraform/modules/x", "./a/.terraform/b", "./${var.ruta}", "./a\\\\b"]) {
+      expect(iam(`module "iam" {\n  source = "${origen}"\n}`).errores, origen)
+        .toEqual(['module.iam: los módulos solo pueden ser locales, con source = "./…", para que se revisen con lo demás']);
+    }
+    expect(iam('module "local" {\n  source = "./modulos/red"\n}')).toEqual({ codigo: 0, errores: [] });
+    expect(iam('module "local" {\n  source = "./x" # con un comentario\n}')).toEqual({ codigo: 0, errores: [] });
+    expect(iam('module "local" { source = "./x" }')).toEqual({ codigo: 0, errores: [] });
+    // Sin espacio tras module, OpenTofu lo acepta igual (revisión de la PR #64).
+    expect(iam('module"iam"{\n  source = "git::https://x/y.git"\n}').errores)
+      .toEqual(['module.iam: los módulos solo pueden ser locales, con source = "./…", para que se revisen con lo demás']);
+    // Un atributo que acaba en source no cuenta como el source, y uno que no es una cadena sola no vale.
+    for (const cuerpo of ['  my-source = "./x"\n  source = ("git::https://x/y.git")',
+      '  source = <<EOT\ngit::https://x/y.git\nEOT', '  source = "./x"\n  source_otro = 1\n  source = "../y"']) {
+      expect(iam(`module "m" {\n${cuerpo}\n}`).errores, cuerpo)
+        .toEqual(['module.m: los módulos solo pueden ser locales, con source = "./…", para que se revisen con lo demás']);
+    }
+    // Dos source en el mismo bloque, uno dentro de otro bloque: no se sabe cuál vale.
+    expect(iam('module "dos" {\n  x = { source = "./bien" }\n  source = "git::https://x/y.git"\n}').errores)
+      .toEqual(['module.dos: los módulos solo pueden ser locales, con source = "./…", para que se revisen con lo demás']);
+  });
+
+  it("un .tfvars con el rol también falla, y un .terraform que no es la caché se revisa", () => {
+    expect(iam('rol = "roles/iam.serviceAccountUser"\n', "staging.tfvars").errores)
+      .toEqual([`fuera de un recurso: ${SERVICE_ACCOUNT_USER}`]);
+    const carpeta = mkdtempSync(join(tmpdir(), "iam-"));
+    try {
+      mkdirSync(join(carpeta, "sub", ".terraform"), { recursive: true });
+      writeFileSync(join(carpeta, "sub", ".terraform", "x.tf"), 'resource "google_project_iam_member" "x" {\n  role = "roles/owner"\n}\n');
+      const r = spawnSync(process.execPath, [SCRIPT_IAM, carpeta], { encoding: "utf8" });
+      expect(r.status).toBe(1);
+    } finally {
+      rmSync(carpeta, { recursive: true, force: true });
+    }
+  });
+
+  it("un recurso escrito sin espacios en la cabecera también se revisa (revisión de la PR #64)", () => {
+    const r = iam('locals { a = "roles/iam.serviceAccount" }\nresource"google_project_iam_member""x"{\n  role = "${local.a}User"\n}\n');
+    expect(r.codigo).toBe(1);
+  });
+
+  it("una etiqueta con letras fuera de ASCII se lee, y una cabecera que no se sabe leer hace que falle (revisión de la PR #64)", () => {
+    expect(iam('resource "google_project_iam_member" "año" {\n  role = "roles/owner"\n}\n').codigo).toBe(1);
+    expect(iam('resource google_project_iam_member año {\n  role = "roles/owner"\n}\n').codigo).toBe(1);
+    expect(iam('resource "google_project_iam_member" "x" "y" {\n  role = "roles/owner"\n}\n').errores).toEqual([ILEGIBLE]);
+    expect(iam('module "m" "n" {\n  source = "git::https://x/y.git"\n}\n').errores).toEqual([ILEGIBLE]);
+    // Una etiqueta con un escape, que OpenTofu lee como google_project_iam_member, no se entiende.
+    expect(iam('resource "google_project_iam\\u005fmember" "x" {\n  role = "roles/owner"\n}\n').errores).toEqual([ILEGIBLE]);
+    // Una cabecera falsa dentro de una cadena no tapa una real que no se entiende (revisión de seguridad de la PR #64).
+    expect(iam('locals {\n  x = "resource a b {}"\n}\nresource "google_project_iam\\u005fmember" "y" {\n  role = "roles/owner"\n}\n')
+      .errores).toEqual([ILEGIBLE]);
+    // Un atributo que se llama resource no es una cabecera.
+    expect(iam('resource "google_storage_bucket" "b" {\n  resource = "x"\n}\n')).toEqual({ codigo: 0, errores: [] });
+  });
+
   it("si una cadena o un bloque no se cierra, falla en vez de fiarse de lo leído", () => {
     for (const tf of ['resource "google_project_iam_member" "x" {\n  role = "roles/owner', 'resource "a" "b" {\n',
       'locals {\n  x = "${"\n}\n']) {
-      expect(iam(tf)).toEqual({ codigo: 1, errores: ["no se puede leer: una cadena, un heredoc o un bloque no se cierra"] });
+      expect(iam(tf)).toEqual({ codigo: 1, errores: ["no se puede leer: una cadena, un heredoc o un bloque no se cierra, o una cabecera resource o module no se entiende"] });
     }
   });
 

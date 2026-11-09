@@ -17,10 +17,22 @@ const INICIADO_POR = /^Diverger-Iniciado-por:[ \t]*([A-Za-z0-9][A-Za-z0-9-]{0,38
 
 const deApp = (usuario) => esBot(usuario?.login) || usuario?.type === "Bot";
 
+export const ACTIONS = 15368; // La integración de GitHub Actions, la que fija aplicar-politica.sh al check.
+
 /** Si las reglas de la rama exigen el check otra-persona. */
 export function exigida(reglas) {
   return Array.isArray(reglas) && reglas.some((regla) => regla?.type === "required_status_checks"
     && (regla.parameters?.required_status_checks ?? []).some((check) => check?.context === CHECK));
+}
+
+/** Lo que tiene que acompañar al check para que valga (revisión de seguridad de la PR #63): que esté fijado a GitHub
+ * Actions y que otra persona tenga que aprobar el último push, que es lo que para un commit con el correo de la App. */
+export function bienFijada(reglas) {
+  const fijado = reglas.some((regla) => regla?.type === "required_status_checks"
+    && (regla.parameters?.required_status_checks ?? []).some((c) => c?.context === CHECK && c?.integration_id === ACTIONS));
+  const ultimoPush = reglas.some((regla) => regla?.type === "pull_request"
+    && regla.parameters?.require_last_push_approval === true);
+  return fijado && ultimoPush;
 }
 
 /** Quiénes lanzaron el harness según el Diverger-Iniciado-por de los commits, en minúsculas. En una PR que abre una
@@ -28,9 +40,10 @@ export function exigida(reglas) {
  * suyos que dijeran que la lanzó otra (revisión de la PR #63). */
 export function lanzadores(commits, pr) {
   const logins = new Set();
-  const soloDeLaApp = deApp(pr?.user);
+  // Solo los de la misma App que abre la PR, no los de cualquier GitHub App (revisión de seguridad de la PR #63).
+  const app = deApp(pr?.user) ? String(pr.user.login).toLowerCase() : undefined;
   for (const commit of commits) {
-    if (soloDeLaApp && !deApp(commit?.author)) continue;
+    if (app && String(commit?.author?.login ?? "").toLowerCase() !== app) continue;
     for (const coincidencia of String(commit?.commit?.message ?? "").matchAll(INICIADO_POR)) {
       logins.add(coincidencia[1].toLowerCase());
     }
@@ -77,6 +90,10 @@ export function candidatos({ pr, commits, revisiones }) {
 export function decidir({ reglas, pr, commits, revisiones, permisos = {} }) {
   if (!exigida(reglas)) {
     return { ok: true, mensaje: `Las reglas de la rama base no exigen ${CHECK}: no hay nada que comprobar` };
+  }
+  if (!bienFijada(reglas)) {
+    return { ok: false, mensaje: `Las reglas de la rama base exigen ${CHECK}, pero sin fijarlo a GitHub Actions o sin `
+      + `pedir que otra persona apruebe el último push: vuelve a aplicar la política con aplicar-politica.sh del harness` };
   }
   if ((pr?.commits ?? 0) > commits.length || commits.length >= MAX_COMMITS) {
     return { ok: false, mensaje: `No se pueden leer todos los commits de la PR (${pr?.commits ?? commits.length}): ${MENSAJE}` };
