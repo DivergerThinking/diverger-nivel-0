@@ -37,6 +37,15 @@ describe("quién lanzó la ejecución", () => {
       ejecucion: `https://github.com/${REPO}/actions/runs/800` });
   });
 
+  it("si el bucle lanzó el worker con el GITHUB_TOKEN del job, también es quien lanzó el bucle (harness#753)", async () => {
+    // Con el GITHUB_TOKEN, quien lanza el worker es github-actions[bot], no la App del harness.
+    const ejecuciones = lanzadoPorElBucle("joselcs")
+      .map((e) => e.id === 900 ? { ...e, actor: { login: "github-actions[bot]" } } : e);
+    const r = await lanzador({ ejecuciones, usuarios: PERSONAS }, "900", "prestamos");
+    expect(r.errores).toBe("");
+    expect(JSON.parse(r.salida)).toMatchObject({ login: "joselcs", id: 1234567 });
+  });
+
   it("si una persona lanzó el worker a mano, es esa persona", async () => {
     const ejecuciones = lanzadoPorElBucle("joselcs").map((e) => e.id === 900 ? { ...e, actor: { login: "ana-lopez" } } : e);
     const r = await lanzador({ ejecuciones, usuarios: PERSONAS }, "900", "prestamos");

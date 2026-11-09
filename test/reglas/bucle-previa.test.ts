@@ -28,10 +28,10 @@ const VARIABLES = {
 };
 
 describe("forma de la comprobación previa en el bucle", () => {
-  it("va antes de pedir el token que lanza los workers y antes del bucle", () => {
+  it("va antes de usar el token que lanza los workers y antes del bucle", () => {
     for (const nombre of ["Comprobación previa del secreto y las variables", "previa-gcp", "Comprobación previa del acceso a GCP"]) {
       expect(indice(nombre), nombre).toBeGreaterThan(0);
-      expect(indice(nombre)).toBeLessThan(indice("Token para lanzar los workers"));
+      expect(indice(nombre)).toBeLessThan(indice("Recuperar el estado anterior"));
       expect(PASOS[indice(nombre)]?.if).toBeUndefined();
     }
     expect(indice("Comprobación previa del secreto y las variables")).toBeLessThan(indice("previa-gcp"));

@@ -39,7 +39,7 @@ export const PERSONAS: Datos["usuarios"] = {
   "ana-lopez": { id: 7654321, name: "Ana López" },
 };
 
-/** Un worker lanzado por el bucle (con la identidad del harness) y el bucle, lanzado por `persona`. */
+/** Un worker lanzado por el bucle (con una cuenta de GitHub App) y el bucle, lanzado por `persona`. */
 export function lanzadoPorElBucle(persona: string, iniciativa = "prestamos"): Ejecucion[] {
   return [
     { id: 900, path: ".github/workflows/diverger-worker.yml", actor: { login: "diverger-harness[bot]" },

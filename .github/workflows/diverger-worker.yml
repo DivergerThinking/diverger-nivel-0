@@ -165,8 +165,8 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
-      # Quién lanzó la ejecución (EN-OPS-06): github.actor de este job o, si lo lanzó el bucle con la identidad del
-      # harness, el del bucle. Lo dice GitHub, no el modelo; el script es el de la rama base. Va antes del modelo para que
+      # Quién lanzó la ejecución (EN-OPS-06): github.actor de este job o, si lo lanzó el bucle con el GITHUB_TOKEN del
+      # suyo (github-actions[bot], harness#753), el del bucle. Lo dice GitHub, no el modelo; el script es el de la rama base. Va antes del modelo para que
       # su telemetría lo lleve (EN-OPS-07, ADR 0047 del harness), y en las salidas del paso, que ningún otro paso cambia.
       - name: Quién lanzó la ejecución
         id: lanzador

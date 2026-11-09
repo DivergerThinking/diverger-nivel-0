@@ -1,6 +1,6 @@
 // Bucle desatendido (HU-EJE-01, ADR 0016 del harness): lo que se puede comprobar del workflow sin
 // GitHub. Que se lanza a mano, descarga el núcleo con un token de solo lectura, lanza los workers con
-// un token limitado a Actions y lectura, no ejecuta ningún modelo y, de GCP, solo usa la cuenta de
+// el GITHUB_TOKEN del job, limitado a Actions, issues y lectura, no ejecuta ningún modelo y, de GCP, solo usa la cuenta de
 // telemetría al terminar para registrar el resultado (EN-TEL-02, ADR 0017 del harness).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -66,9 +66,11 @@ describe("workflow del bucle desatendido", () => {
     expect(WF.concurrency).toEqual({ group: "diverger-bucle-${{ inputs.initiative }}", "cancel-in-progress": false });
   });
 
-  it("el token del job es de solo lectura y GCP solo con la cuenta de telemetría", () => {
+  it("el token del job solo escribe en Actions e issues, y GCP solo con la cuenta de telemetría", () => {
     expect(WF.permissions).toEqual({ contents: "read" });
-    expect(JOB.permissions).toEqual({ contents: "read", "id-token": "write" });
+    // Actions, issues y PR, para el GITHUB_TOKEN con el que el bucle lanza los workers (harness#753).
+    expect(JOB.permissions).toEqual({ contents: "read", "id-token": "write", actions: "write", issues: "write",
+      "pull-requests": "read" });
     expect(INICIO_PREVIA).toBeGreaterThan(0);
     expect(SIN_PREVIA).not.toMatch(/GCP_DEPLOY_SA|environment:/);
     const auth = PASOS.filter((p) => p.uses?.startsWith("google-github-actions/auth@") && p.id !== "previa-gcp");
@@ -121,15 +123,19 @@ describe("workflow del bucle desatendido", () => {
       "sparse-checkout": "plugins/diverger/server" });
   });
 
-  it("lanza los workers con un token limitado a Actions, issues y lectura de contenido y PR", () => {
-    const token = paso("token-bucle");
-    const permisos = Object.fromEntries(Object.entries(token.with ?? {}).filter(([k]) => k.startsWith("permission-")));
-    // issues: write, para avisar de una tarea bloqueada (harness ADR 0029).
-    expect(permisos).toEqual({ "permission-actions": "write", "permission-contents": "read", "permission-issues": "write",
-      "permission-pull-requests": "read" });
-    expect(token.with?.repositories).toBe("${{ github.event.repository.name }}");
-    expect(paso("Bucle").env).toEqual({ GH_TOKEN: "${{ steps.token-bucle.outputs.token }}",
+  it("lanza los workers con el GITHUB_TOKEN del job, que dura lo que el job, y no con un token de la App (harness#753)", () => {
+    // El token de instalación de una GitHub App caduca a la hora, y el bucle dura hasta 350 minutos: la sexta ejecución
+    // del nivel 1 se paró con «HTTP 401: Bad credentials» a los 61 minutos. Ningún paso del bucle puede usar un token de
+    // la App, salvo el que descarga el núcleo al principio.
+    const tokensDeLaApp = PASOS.filter((p) => p.uses?.startsWith("actions/create-github-app-token@"));
+    expect(tokensDeLaApp.map((p) => p.id)).toEqual(["token-nucleo"]);
+    expect(paso("Recuperar el estado anterior").env).toEqual({ GH_TOKEN: "${{ github.token }}" });
+    expect(paso("Bucle").env).toEqual({ GH_TOKEN: "${{ github.token }}",
       GCP_ARRANQUE: "${{ steps.gcp-arranque.outcome }}", LANZADO_POR: "${{ github.actor }}" });
+    for (const p of PASOS) {
+      if (p.id === "token-nucleo" || p.with?.repository === "${{ github.repository_owner }}/Diverger-ExP-Harness") continue;
+      expect(JSON.stringify(p), p.name ?? p.id ?? p.uses).not.toMatch(/steps\.token-[a-z-]+\.outputs\.token/);
+    }
     // La issue se asigna a quien lanzó el bucle, solo si es una persona: un «…[bot]» no pasa la expresión.
     expect(paso("Bucle").run).toContain('[[ "$LANZADO_POR" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] && opciones+=(--notify "$LANZADO_POR")');
   });

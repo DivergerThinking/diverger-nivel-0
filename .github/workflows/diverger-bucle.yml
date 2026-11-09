@@ -9,8 +9,9 @@ run-name: diverger-bucle ${{ inputs.initiative }}
 #
 # El código del bucle es del núcleo, en el repositorio privado del harness: el job lo descarga con un
 # token de la GitHub App diverger-harness de solo lectura (ADR 0016, «De dónde saca el job el código
-# del núcleo»). Para lanzar workers usa otro token de la App, con Actions: escritura y lectura de
-# contenido y PR en este repositorio. No ejecuta ningún modelo.
+# del núcleo»). Para lanzar workers, mirar sus PR y avisar de una tarea bloqueada usa el GITHUB_TOKEN del
+# job, con Actions e issues de escritura y lectura de contenido y PR en este repositorio: dura lo que el job, y
+# el token de la App caduca a la hora, menos de lo que puede durar el bucle (harness#753). No ejecuta ningún modelo.
 #
 # Al parar, el bucle deja el resultado de cada tarea y de la fase, y el job lo registra en el log
 # diverger-ejecucion de Cloud Logging con la cuenta diverger-telemetry, que solo escribe logs y
@@ -51,6 +52,11 @@ jobs:
     permissions:
       contents: read
       id-token: write # Solo para la cuenta de telemetría: la comprobación previa, el arranque y el final (ADR 0017).
+      # Para el GITHUB_TOKEN con el que el bucle lanza los workers (workflow_dispatch sí crea ejecuciones con ese
+      # token), mira sus jobs y sus PR y abre la issue de una tarea bloqueada (ADR 0029 del harness).
+      actions: write
+      issues: write
+      pull-requests: read
     env:
       INICIATIVA: ${{ inputs.initiative }}
       MAX_WORKERS: ${{ inputs.max-workers }}
@@ -65,7 +71,8 @@ jobs:
           [[ "$INICIATIVA" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] || fallar "La iniciativa «$INICIATIVA» no es válida"
           [[ -z "$MAX_WORKERS" || "$MAX_WORKERS" =~ ^[1-3]$ ]] || fallar "max-workers tiene que estar vacío o ser un entero entre 1 y 3"
           [[ "$NUCLEO_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || fallar "DIVERGER_HARNESS_REF no es válida"
-      # La rama base, con las credenciales del job (solo lectura) para que el bucle haga git pull.
+      # La rama base, con el GITHUB_TOKEN del job guardado para que el bucle haga git pull. Ese token puede escribir en
+      # Actions e issues de este repositorio, lo mismo que hace el bucle; en el contenido, solo leer.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Comprobación previa (EN-GP-04, ADR 0049 del harness): antes de lanzar ningún worker, el secreto, las variables y
       # el acceso a GCP. Si algo falla, el job se para aquí, sin tocar run.json, con la orden que lo arregla en el resumen.
@@ -116,23 +123,11 @@ jobs:
       # El núcleo no es parte del proyecto: que git no lo vea como un cambio.
       - name: Ocultar el núcleo a git
         run: echo "/.diverger-nucleo/" >> .git/info/exclude
-      - name: Token para lanzar los workers
-        id: token-bucle
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          app-id: ${{ vars.DIVERGER_HARNESS_APP_ID }}
-          private-key: ${{ secrets.DIVERGER_HARNESS_APP_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-actions: write
-          permission-contents: read
-          permission-issues: write # Para avisar de una tarea bloqueada con una issue (ADR 0029 del harness).
-          permission-pull-requests: read
       # El gasto vive en run.json, que no se versiona: sin esto, relanzar en un job nuevo lo pondría a cero (ADR 0024).
       - name: Recuperar el estado anterior
         id: estado
         env:
-          GH_TOKEN: ${{ steps.token-bucle.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
         run: bash .github/diverger/bucle-estado.sh
       # Para registrar el arranque y que el panel enseñe la ejecución en curso (harness#536). Si falla, solo se
       # pierde esa fila.
@@ -145,7 +140,7 @@ jobs:
           service_account: ${{ vars.GCP_TELEMETRY_SA }}
       - name: Bucle
         env:
-          GH_TOKEN: ${{ steps.token-bucle.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           GCP_ARRANQUE: ${{ steps.gcp-arranque.outcome }}
           # Quien lanzó el bucle, si es una persona: se le asigna la issue de una tarea bloqueada (ADR 0029), y run.json,
           # la issue y las filas de la telemetría lo dicen (EN-OPS-07, ADR 0047 del harness). Va con --notify, el nombre

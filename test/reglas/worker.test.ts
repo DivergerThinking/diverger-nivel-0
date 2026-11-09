@@ -366,7 +366,7 @@ describe("forma del workflow del worker", () => {
       LANZADO_POR_ID: "${{ steps.lanzador.outputs.id }}", LANZADO_POR_NOMBRE: "${{ steps.lanzador.outputs.nombre }}" });
     expect(commit.run).toContain('--trailer "Co-authored-by: $LANZADO_POR_NOMBRE <$LANZADO_POR_ID+$LANZADO_POR@users.noreply.github.com>"');
     expect(SIN_COMENTARIOS).not.toMatch(/LANZADO_POR[A-Z_]*=.*GITHUB_ENV/);
-    // El bucle lanza el worker con la identidad del harness: github.actor sería diverger-harness[bot].
+    // El bucle lanza el worker con el GITHUB_TOKEN de su job: github.actor sería github-actions[bot] (harness#753).
     expect(SIN_COMENTARIOS).not.toContain("github.actor");
     expect(paso("Rama y PR").env?.LANZADO_POR).toBe("${{ steps.lanzador.outputs.login }}");
     expect(paso("Rama y PR").run).toContain("Lanzado por @$LANZADO_POR. Job del worker: $GITHUB_SERVER_URL/$repo/actions/runs/$GITHUB_RUN_ID");
