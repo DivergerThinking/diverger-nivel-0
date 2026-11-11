@@ -114,13 +114,15 @@ function commitDelHarness(iniciadoPor: string | undefined, coautor = iniciadoPor
   commit(`feat: TA-004 Prestar un equipo\n\n${trailers.join("\n")}`, HARNESS);
 }
 
-async function comprobarPR(datos: Datos, cuerpo = CUERPO, rama = RAMA, base = "main"): Promise<{ codigo: number; errores: string }> {
-  const api = await arrancar(datos);
+// La descripción la da la API (PR 55), como en el CI; `delEvento` es la del evento, que el script ya no usa con número.
+async function comprobarPR(datos: Datos, cuerpo: string | null = CUERPO, rama = RAMA, base = "main",
+  autor = "diverger-harness[bot]", delEvento = "Descripción vieja del evento"): Promise<{ codigo: number; errores: string }> {
+  const api = await arrancar({ ...datos, prs: datos.prs ?? (cuerpo === null ? {} : { 55: { body: cuerpo } }) });
   servidor = api.servidor;
   try {
     await promisify(execFile)(process.execPath, [SCRIPT, "base..HEAD"], {
       cwd: repo,
-      env: { ...process.env, GITHUB_API_URL: api.url, GITHUB_REPOSITORY: REPO, GH_TOKEN: "token-de-prueba", PR_CUERPO: cuerpo, PR_RAMA: rama, PR_BASE: base },
+      env: { ...process.env, GITHUB_API_URL: api.url, GITHUB_REPOSITORY: REPO, GH_TOKEN: "token-de-prueba", PR_NUMERO: "55", PR_CUERPO: delEvento, PR_AUTOR: autor, PR_RAMA: rama, PR_BASE: base },
     });
     return { codigo: 0, errores: "" };
   } catch (error) {
@@ -229,7 +231,7 @@ describe.skipIf(!HAY_GIT)("trailer de quien lanzó el harness (EN-OPS-06)", () =
 // Commits de preparar-nivel-0.yml y ajustes-nivel-0.yml del harness (harness#528): autor diverger-harness[bot],
 // con los cuatro trailers, en diverger/reinicio/<número> o diverger/ajustes/<número>. El harness es privado y el
 // CI de la aplicación no puede leer sus ejecuciones: no se comparan con una, pero sí con el usuario de GitHub.
-const CUERPO_REINICIO = "Deja `diverger-nivel-0` con solo la plantilla. La abre `preparar-nivel-0.yml` del harness: https://github.com/DivergerThinking/Diverger-ExP-Harness/actions/runs/19123456789\n";
+const CUERPO_REINICIO = "Deja `diverger-nivel-0` con solo la plantilla. Lanzado por @joselcs. La abre `preparar-nivel-0.yml` del harness: https://github.com/DivergerThinking/Diverger-ExP-Harness/actions/runs/19123456789\n";
 
 function commitDeMantenimiento(trailers: string[] | undefined): void {
   git(["config", "core.hooksPath", join(repo, "sin-hooks")]);
@@ -306,6 +308,121 @@ describe.skipIf(!HAY_GIT)("commits de mantenimiento del kit de evaluación (harn
   });
 });
 
+// La descripción de cada PR del harness dice «Lanzado por @login», con el login de Diverger-Iniciado-por (EN-OPS-07,
+// ADR 0047 del harness).
+describe.skipIf(!HAY_GIT)("«Lanzado por» en la descripción de la PR del harness (EN-OPS-07)", () => {
+  const LANZADO_POR_JOSELCS = { ejecuciones: lanzadoPorElBucle("joselcs"), usuarios: PERSONAS };
+  const SOLO_EL_JOB = `Job del worker: https://github.com/${REPO}/actions/runs/900\n`;
+
+  it("la PR del worker que lo dice pasa", async () => {
+    commitDelHarness("joselcs");
+    expect(await comprobarPR(LANZADO_POR_JOSELCS)).toEqual({ codigo: 0, errores: "" });
+  });
+
+  it("la PR del worker sin «Lanzado por» falla y no se puede integrar", async () => {
+    commitDelHarness("joselcs");
+    const { codigo, errores } = await comprobarPR(LANZADO_POR_JOSELCS, SOLO_EL_JOB);
+    expect(codigo).toBe(1);
+    expect(errores.trim()).toBe("Falta “Lanzado por” en la descripción de la PR");
+  });
+
+  it.each(["Lanzado por @ana-lopez. ", "Lanzado por @joselcs-x. "])("falla si dice otra persona: %s", async (texto) => {
+    commitDelHarness("joselcs");
+    const { codigo, errores } = await comprobarPR(LANZADO_POR_JOSELCS, texto + SOLO_EL_JOB);
+    expect(codigo).toBe(1);
+    expect(errores).toContain(`“${texto.slice(0, -2)}” no coincide con quien lanzó el harness (Diverger-Iniciado-por: joselcs)`);
+  });
+
+  it("«Lanzado por» no distingue mayúsculas en el login, como GitHub", async () => {
+    commitDelHarness("joselcs");
+    expect(await comprobarPR(LANZADO_POR_JOSELCS, `Lanzado por @JoseLCS. ${SOLO_EL_JOB}`)).toEqual({ codigo: 0, errores: "" });
+  });
+
+  it("la PR de mantenimiento del kit de evaluación sin «Lanzado por» falla", async () => {
+    commitDeMantenimiento(trailersDeMantenimiento("joselcs"));
+    const { codigo, errores } = await comprobarPR({ ejecuciones: [], usuarios: PERSONAS },
+      CUERPO_REINICIO.replace("Lanzado por @joselcs. ", ""), "diverger/reinicio/19123456789");
+    expect(codigo).toBe(1);
+    expect(errores.trim()).toBe("Falta “Lanzado por” en la descripción de la PR");
+  });
+
+  it("la PR que abre la identidad del harness falla sin «Lanzado por» aunque no tenga commits suyos", async () => {
+    commit("docs: README");
+    const { codigo, errores } = await comprobarPR({ ejecuciones: [], usuarios: PERSONAS }, "Sin texto", "otra-rama");
+    expect(codigo).toBe(1);
+    expect(errores.trim()).toBe("Falta “Lanzado por” en la descripción de la PR");
+  });
+
+  it("relanzar el job lee la descripción actual de la API, no la del evento", async () => {
+    commitDelHarness("joselcs");
+    // Alguien quitó el texto después de abrir la PR: el evento aún lo tiene, la API ya no.
+    const { codigo, errores } = await comprobarPR(LANZADO_POR_JOSELCS, SOLO_EL_JOB, RAMA, "main", "diverger-harness[bot]", CUERPO);
+    expect(codigo).toBe(1);
+    expect(errores.trim()).toBe("Falta “Lanzado por” en la descripción de la PR");
+    // Y al revés: se corrigió la descripción y el evento sigue con la vieja.
+    expect(await comprobarPR(LANZADO_POR_JOSELCS, CUERPO, RAMA, "main", "diverger-harness[bot]", SOLO_EL_JOB))
+      .toEqual({ codigo: 0, errores: "" });
+  });
+
+  it("si no puede leer la descripción de una PR del harness, falla y dice por qué", async () => {
+    commitDelHarness("joselcs");
+    const { codigo, errores } = await comprobarPR(LANZADO_POR_JOSELCS, null);
+    expect(codigo).toBe(1);
+    expect(errores).toContain("No se puede leer la descripción de la PR: La API de GitHub responde 404 a repos/");
+  });
+
+  it("la PR de mantenimiento que dice otra persona falla", async () => {
+    commitDeMantenimiento(trailersDeMantenimiento("joselcs"));
+    const { codigo, errores } = await comprobarPR({ ejecuciones: [], usuarios: PERSONAS },
+      CUERPO_REINICIO.replace("@joselcs", "@ana-lopez"), "diverger/reinicio/19123456789");
+    expect(codigo).toBe(1);
+    expect(errores).toContain("“Lanzado por @ana-lopez” no coincide con quien lanzó el harness (Diverger-Iniciado-por: joselcs)");
+  });
+
+  it("la PR de Dependabot no es del harness y no necesita «Lanzado por» ni la API", async () => {
+    git(["config", "core.hooksPath", join(repo, "sin-hooks")]);
+    commit("build(deps): bump vite", { GIT_AUTHOR_NAME: "dependabot[bot]", GIT_AUTHOR_EMAIL: "49699333+dependabot[bot]@users.noreply.github.com" });
+    expect(await comprobarPR({ ejecuciones: [], usuarios: PERSONAS }, null, "dependabot/npm_and_yarn/vite-7.1.0", "main",
+      "dependabot[bot]")).toEqual({ codigo: 0, errores: "" });
+  });
+
+  // Con el ci.yml de una plantilla anterior, que pasa PR_CUERPO y no PR_NUMERO (un reinicio a esa plantilla).
+  async function sinNumero(cuerpo: string | undefined): Promise<{ codigo: number; errores: string }> {
+    const api = await arrancar({ ...LANZADO_POR_JOSELCS, prs: {} });
+    servidor = api.servidor;
+    const env: Record<string, string | undefined> = { ...process.env, GITHUB_API_URL: api.url, GITHUB_REPOSITORY: REPO,
+      GH_TOKEN: "token-de-prueba", PR_AUTOR: "diverger-harness[bot]", PR_RAMA: RAMA, PR_BASE: "main", PR_CUERPO: cuerpo };
+    delete env.PR_NUMERO;
+    if (cuerpo === undefined) delete env.PR_CUERPO;
+    try {
+      await promisify(execFile)(process.execPath, [SCRIPT, "base..HEAD"], { cwd: repo, env });
+      return { codigo: 0, errores: "" };
+    } catch (error) {
+      const fallo = error as { code: number; stderr: string };
+      return { codigo: fallo.code, errores: fallo.stderr };
+    }
+  }
+
+  it("sin PR_NUMERO usa PR_CUERPO, como con el ci.yml de una plantilla anterior", async () => {
+    commitDelHarness("joselcs");
+    expect(await sinNumero(CUERPO)).toEqual({ codigo: 0, errores: "" });
+  });
+
+  it("sin PR_NUMERO ni PR_CUERPO, la PR del harness falla", async () => {
+    commitDelHarness("joselcs");
+    const { codigo, errores } = await sinNumero(undefined);
+    expect(codigo).toBe(1);
+    expect(errores).toContain("Falta “Lanzado por” en la descripción de la PR");
+  });
+
+  it("la PR de una persona no necesita «Lanzado por»", async () => {
+    commit("docs: README");
+    commit("feat: algo", AGENTE);
+    expect(await comprobarPR({ ejecuciones: [], usuarios: PERSONAS }, "Sin texto", "otra-rama", "main", "joselcs"))
+      .toEqual({ codigo: 0, errores: "" });
+  });
+});
+
 describe("job trailers del CI", () => {
   const ci = parse(readFileSync(join(RAIZ, ".github", "workflows", "ci.yml"), "utf8")) as {
     jobs: Record<string, { permissions?: Record<string, string>; steps: { uses?: string; with?: Record<string, unknown>; env?: Record<string, string>; run?: string }[] }>;
@@ -318,14 +435,17 @@ describe("job trailers del CI", () => {
     expect(job.steps.some((p) => p.run?.includes('git fetch --quiet origin "refs/pull/$NUMERO/head"'))).toBe(true);
   });
 
-  it("pasa la descripción y la rama de la PR y puede leer las ejecuciones (EN-OPS-06)", () => {
-    expect(job.permissions).toEqual({ contents: "read", actions: "read" });
+  it("pasa el número, el autor y la rama de la PR y puede leer las ejecuciones y la PR (EN-OPS-06, EN-OPS-07)", () => {
+    expect(job.permissions).toEqual({ contents: "read", actions: "read", "pull-requests": "read" });
     const paso = job.steps.find((p) => p.run === 'node scripts/trailers.mjs "$RANGO"');
     expect(paso?.env).toMatchObject({
       GH_TOKEN: "${{ github.token }}",
-      PR_CUERPO: "${{ github.event.pull_request.body }}",
+      PR_NUMERO: "${{ github.event.pull_request.number }}",
+      PR_AUTOR: "${{ github.event.pull_request.user.login }}",
       PR_RAMA: "${{ github.head_ref }}",
       PR_BASE: "${{ github.base_ref }}",
     });
+    // La descripción del evento no: un «Re-run» repetiría la de entonces.
+    expect(paso?.env?.PR_CUERPO).toBeUndefined();
   });
 });
