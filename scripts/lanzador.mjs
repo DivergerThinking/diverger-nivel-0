@@ -1,5 +1,5 @@
 // Quién lanzó una ejecución del harness (EN-OPS-06, RQ.066, ADR 0008 del harness). Lo dice GitHub, no
-// el modelo: es quien lanzó el job del worker o, si lo lanzó el bucle con la identidad del harness, quien
+// el modelo: es quien lanzó el job del worker o, si lo lanzó el bucle con una cuenta de GitHub App, quien
 // lanzó ese bucle. Lo usan el worker, para los trailers de su commit, y el CI, para comprobarlos.
 // Uso: node scripts/lanzador.mjs <id del job del worker> <iniciativa>. Escribe en JSON
 // { login, id, nombre, ejecucion } y necesita GH_TOKEN (o GITHUB_TOKEN) con lectura de Actions.
@@ -55,7 +55,8 @@ export async function quienLanzo({ api, repo, ejecucion, iniciativa, pr }) {
   }
   let lanzada = worker;
   if (esBot(worker.actor?.login)) {
-    // El bucle lanza los workers con la identidad del harness. Solo hay un bucle por iniciativa a la
+    // El bucle lanza los workers con el GITHUB_TOKEN del job, github-actions[bot] (harness#753); antes, con la
+    // identidad del harness. Las dos acaban en [bot]. Solo hay un bucle por iniciativa a la
     // vez (su concurrency), así que el que lanzó este worker es el que estaba en marcha cuando empezó.
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(iniciativa ?? "")) {
       throw new Error(`La iniciativa «${iniciativa ?? ""}» no es válida`);

@@ -9,13 +9,15 @@ run-name: diverger-bucle ${{ inputs.initiative }}
 #
 # El código del bucle es del núcleo, en el repositorio privado del harness: el job lo descarga con un
 # token de la GitHub App diverger-harness de solo lectura (ADR 0016, «De dónde saca el job el código
-# del núcleo»). Para lanzar workers usa otro token de la App, con Actions: escritura y lectura de
-# contenido y PR en este repositorio. No ejecuta ningún modelo.
+# del núcleo»). Para lanzar workers, mirar sus PR y avisar de una tarea bloqueada usa el GITHUB_TOKEN del
+# job, con Actions e issues de escritura y lectura de contenido y PR en este repositorio: dura lo que el job, y
+# el token de la App caduca a la hora, menos de lo que puede durar el bucle (harness#753). No ejecuta ningún modelo.
 #
 # Al parar, el bucle deja el resultado de cada tarea y de la fase, y el job lo registra en el log
 # diverger-ejecucion de Cloud Logging con la cuenta diverger-telemetry, que solo escribe logs y
 # métricas (EN-TEL-02, ADR 0017 del harness). Unas vistas de BigQuery lo unen al coste y al tiempo
-# de la telemetría de los workers. Sin GCP_WIF_PROVIDER y GCP_TELEMETRY_SA no se registra nada.
+# de la telemetría de los workers. Sin GCP_WIF_PROVIDER y GCP_TELEMETRY_SA el bucle no arranca: la comprobación
+# previa (EN-GP-04, ADR 0049 del harness) para el job antes de lanzar ningún worker.
 
 on:
   workflow_dispatch:
@@ -49,7 +51,14 @@ jobs:
     timeout-minutes: 350
     permissions:
       contents: read
-      id-token: write # Solo para la cuenta de telemetría, al arrancar y al terminar (ADR 0017).
+      id-token: write # Solo para la cuenta de telemetría: la comprobación previa, el arranque y el final (ADR 0017).
+      # Para el GITHUB_TOKEN con el que el bucle lanza los workers (workflow_dispatch sí crea ejecuciones con ese
+      # token), mira sus jobs y sus PR y abre la issue de una tarea bloqueada (ADR 0029 del harness). Escribe en las PR
+      # solo para cerrar la de una tarea con conflictos con la rama base, que se vuelve a construir (harness#770); no
+      # aprueba ni integra nada, y sin contents: write no toca ninguna rama.
+      actions: write
+      issues: write
+      pull-requests: write
     env:
       INICIATIVA: ${{ inputs.initiative }}
       MAX_WORKERS: ${{ inputs.max-workers }}
@@ -64,8 +73,38 @@ jobs:
           [[ "$INICIATIVA" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] || fallar "La iniciativa «$INICIATIVA» no es válida"
           [[ -z "$MAX_WORKERS" || "$MAX_WORKERS" =~ ^[1-3]$ ]] || fallar "max-workers tiene que estar vacío o ser un entero entre 1 y 3"
           [[ "$NUCLEO_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || fallar "DIVERGER_HARNESS_REF no es válida"
-      # La rama base, con las credenciales del job (solo lectura) para que el bucle haga git pull.
+      # La rama base, con el GITHUB_TOKEN del job guardado para que el bucle haga git pull. Ese token puede escribir en
+      # Actions e issues de este repositorio, lo mismo que hace el bucle; en el contenido, solo leer.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Comprobación previa (EN-GP-04, ADR 0049 del harness): antes de lanzar ningún worker, el secreto, las variables y
+      # el acceso a GCP. Si algo falla, el job se para aquí, sin tocar run.json, con la orden que lo arregla en el resumen.
+      # El secreto solo está en el env de este paso, y el script nunca lo imprime.
+      - name: Comprobación previa del secreto y las variables
+        env:
+          CLAVE_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          GCP_DEPLOY_SA: ${{ vars.GCP_DEPLOY_SA }}
+          GCP_ARTIFACT_REPO: ${{ vars.GCP_ARTIFACT_REPO }}
+          GCP_TELEMETRY_SA: ${{ vars.GCP_TELEMETRY_SA }}
+        run: bash .github/diverger/bucle-previa.sh secreto-y-variables
+      # Sin token_format, la acción solo canjea el token de GitHub en el STS de Google, y el proveedor acepta cualquier
+      # repositorio de la organización. Con access_token pide además un token de la cuenta de telemetría, que solo
+      # aceptan los repositorios que gcp.sh tiene en REPOS. Es una sonda: el token dura 5 minutos y no exporta nada.
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        id: previa-gcp
+        continue-on-error: true
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_TELEMETRY_SA }}
+          token_format: access_token
+          access_token_lifetime: 300s
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Comprobación previa del acceso a GCP
+        env:
+          RESULTADO: ${{ steps.previa-gcp.outcome }}
+        run: bash .github/diverger/bucle-previa.sh gcp "$RESULTADO"
       - name: Token de lectura del núcleo
         id: token-nucleo
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
@@ -86,23 +125,11 @@ jobs:
       # El núcleo no es parte del proyecto: que git no lo vea como un cambio.
       - name: Ocultar el núcleo a git
         run: echo "/.diverger-nucleo/" >> .git/info/exclude
-      - name: Token para lanzar los workers
-        id: token-bucle
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
-        with:
-          app-id: ${{ vars.DIVERGER_HARNESS_APP_ID }}
-          private-key: ${{ secrets.DIVERGER_HARNESS_APP_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-actions: write
-          permission-contents: read
-          permission-issues: write # Para avisar de una tarea bloqueada con una issue (ADR 0029 del harness).
-          permission-pull-requests: read
       # El gasto vive en run.json, que no se versiona: sin esto, relanzar en un job nuevo lo pondría a cero (ADR 0024).
       - name: Recuperar el estado anterior
         id: estado
         env:
-          GH_TOKEN: ${{ steps.token-bucle.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
         run: bash .github/diverger/bucle-estado.sh
       # Para registrar el arranque y que el panel enseñe la ejecución en curso (harness#536). Si falla, solo se
       # pierde esa fila.
@@ -115,9 +142,11 @@ jobs:
           service_account: ${{ vars.GCP_TELEMETRY_SA }}
       - name: Bucle
         env:
-          GH_TOKEN: ${{ steps.token-bucle.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           GCP_ARRANQUE: ${{ steps.gcp-arranque.outcome }}
-          # A quién se asigna la issue de una tarea bloqueada: quien lanzó el bucle, si es una persona (ADR 0029).
+          # Quien lanzó el bucle, si es una persona: se le asigna la issue de una tarea bloqueada (ADR 0029), y run.json,
+          # la issue y las filas de la telemetría lo dicen (EN-OPS-07, ADR 0047 del harness). Va con --notify, el nombre
+          # que entiende cualquier núcleo: desde la 0.40.0 es el mismo que --launched-by.
           LANZADO_POR: ${{ github.actor }}
         run: |
           opciones=(--initiative "$INICIATIVA" --repo "$GITHUB_REPOSITORY" --base "$GITHUB_REF_NAME"
@@ -149,15 +178,16 @@ jobs:
           if-no-files-found: ignore
           retention-days: 90
       # Después del bucle, que puede durar horas: el token de GCP dura una. Si el registro falla, el
-      # job no falla por eso: solo se pierde la fila (ADR 0017).
+      # job no falla por eso: solo se pierde la fila (ADR 0017). Sin el estado recuperado el bucle no ha corrido, por
+      # ejemplo si la comprobación previa paró el job, y no hay nada que registrar.
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
-        if: always() && env.TELEMETRIA == 'true'
+        if: always() && env.TELEMETRIA == 'true' && steps.estado.outcome == 'success'
         continue-on-error: true
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_TELEMETRY_SA }}
       - name: Registrar el resultado
-        if: always() && env.TELEMETRIA == 'true'
+        if: always() && env.TELEMETRIA == 'true' && steps.estado.outcome == 'success'
         continue-on-error: true
         run: |
           resultados="$RUNNER_TEMP/resultados.jsonl"

@@ -1,14 +1,17 @@
-// CODEOWNERS sobre la configuración (EN-OPS-04) y la suite de aceptación (EN-CAL-01): el CI falla si
-// .diverger/settings.json, el propio CODEOWNERS o tests/aceptacion/ se quedan sin propietario. Se prueba el script del CI sobre carpetas de juguete.
+// CODEOWNERS sobre la configuración (EN-OPS-04), la suite de aceptación (EN-CAL-01) y las instrucciones de los
+// agentes (EN-OPS-11): el CI falla si .diverger/settings.json, el propio CODEOWNERS, tests/aceptacion/, CLAUDE.md
+// o .claude/settings.json se quedan sin propietario. Se prueba el script del CI sobre carpetas de juguete.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 const RAIZ = join(import.meta.dirname, "..", "..");
 const SCRIPT = join(RAIZ, "scripts", "codeowners.mjs");
-const SUITE = "/tests/aceptacion/ @joselcs @686f6c61\n";
+const INSTRUCCIONES = "CLAUDE.md @joselcs\n/.claude/ @joselcs\n";
+const SUITE = `/tests/aceptacion/ @joselcs @686f6c61\n${INSTRUCCIONES}`;
 const BUENO = `${SUITE}/.diverger/settings.json @joselcs\n/.github/CODEOWNERS @joselcs\n`;
 
 let carpeta = "";
@@ -92,7 +95,7 @@ describe("CODEOWNERS de la configuración", () => {
     escribir("CODEOWNERS", `${SUITE}/.diverger/settings.json @joselcs\n/CODEOWNERS @joselcs\n`);
     expect(comprobar()).toEqual({ codigo: 0, errores: [] });
     escribir(".github/CODEOWNERS", "/src/ @joselcs\n");
-    expect(comprobar().errores).toHaveLength(3);
+    expect(comprobar().errores).toHaveLength(5);
   });
 });
 
@@ -100,13 +103,13 @@ describe("CODEOWNERS de la suite de aceptación (EN-CAL-01)", () => {
   it.each(["/tests/aceptacion/", "/tests/", "tests/aceptacion/", "aceptacion/", "/tests/aceptacion", "*.feature", "*"])(
     "el patrón %s cubre la suite",
     (patron) => {
-      escribir(".github/CODEOWNERS", `${patron} @joselcs\n/.diverger/settings.json @joselcs\n/.github/CODEOWNERS @joselcs\n`);
+      escribir(".github/CODEOWNERS", `${patron} @joselcs\n/.diverger/settings.json @joselcs\n/.github/CODEOWNERS @joselcs\n${INSTRUCCIONES}`);
       expect(comprobar()).toEqual({ codigo: 0, errores: [] });
     },
   );
 
   it("falla si ninguna regla cubre la suite", () => {
-    escribir(".github/CODEOWNERS", "/.diverger/settings.json @joselcs\n/.github/CODEOWNERS @joselcs\n/tests/unitarios/ @joselcs\n");
+    escribir(".github/CODEOWNERS", `/.diverger/settings.json @joselcs\n/.github/CODEOWNERS @joselcs\n/tests/unitarios/ @joselcs\n${INSTRUCCIONES}`);
     expect(comprobar().errores).toEqual([
       ".github/CODEOWNERS: ninguna regla cubre tests/aceptacion/; añade «/tests/aceptacion/ @titular»",
     ]);
@@ -117,5 +120,47 @@ describe("CODEOWNERS de la suite de aceptación (EN-CAL-01)", () => {
     expect(comprobar().errores).toEqual([
       ".github/CODEOWNERS: la última regla que cubre tests/aceptacion/ no tiene propietarios y la deja sin protección",
     ]);
+  });
+});
+
+describe("CODEOWNERS de las instrucciones de los agentes (EN-OPS-11)", () => {
+  const BASE = "/tests/aceptacion/ @joselcs @686f6c61\n/.diverger/settings.json @joselcs\n/.github/CODEOWNERS @joselcs\n";
+
+  it.each([
+    ["CLAUDE.md", "/.claude/settings.json"],
+    ["/CLAUDE.md", "/.claude/"],
+    ["*.md", ".claude/"],
+  ])("los patrones %s y %s cubren CLAUDE.md y .claude/settings.json", (claude, ajustes) => {
+    escribir(".github/CODEOWNERS", `${BASE}${claude} @acme/responsables\n${ajustes} @acme/responsables\n`);
+    expect(comprobar()).toEqual({ codigo: 0, errores: [] });
+  });
+
+  it("falla si nada cubre CLAUDE.md ni .claude/settings.json", () => {
+    escribir(".github/CODEOWNERS", `${BASE}/src/ @acme/responsables\n`);
+    expect(comprobar().errores).toEqual([
+      ".github/CODEOWNERS: ninguna regla cubre CLAUDE.md; añade «/CLAUDE.md @titular»",
+      ".github/CODEOWNERS: ninguna regla cubre .claude/settings.json; añade «/.claude/settings.json @titular»",
+    ]);
+  });
+
+  it("falla si una regla posterior sin propietarios deja .claude/settings.json sin protección", () => {
+    escribir(".github/CODEOWNERS", `${BASE}${INSTRUCCIONES}/.claude/settings.json\n`);
+    expect(comprobar().errores).toEqual([
+      ".github/CODEOWNERS: la última regla que cubre .claude/settings.json no tiene propietarios y la deja sin protección",
+    ]);
+  });
+
+  it("en la plantilla, cualquier CLAUDE.md y todo .claude/ tienen dueño, y el código no", async () => {
+    const { propietarios, reglas } = (await import(pathToFileURL(SCRIPT).href)) as {
+      reglas: (texto: string) => { patron: string; propietarios: string[] }[];
+      propietarios: (lista: { patron: string; propietarios: string[] }[], ruta: string) => string[] | null;
+    };
+    const lista = reglas(readFileSync(join(RAIZ, ".github", "CODEOWNERS"), "utf8"));
+    // Claude Code también carga el CLAUDE.md de la carpeta en la que trabaja, y el worker escribe en src/ y web/.
+    for (const ruta of ["CLAUDE.md", "src/prestamos/CLAUDE.md", "web/CLAUDE.md", ".claude/settings.json", ".claude/agents/x.md"]) {
+      expect(propietarios(lista, ruta), ruta).toEqual(["@joselcs"]);
+    }
+    // Criterio negativo: un cambio solo de código no pide la revisión por las instrucciones.
+    expect(propietarios(lista, "src/reservas.ts")).toBeNull();
   });
 });
