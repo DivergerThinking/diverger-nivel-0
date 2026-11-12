@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "id": "TA-EJE04-estado",
   "title": "Estado: consultar el estado del servicio (GET /api/estado)",
+  "story": "HU-AVI-02",
   "status": "pending",
   "context": "estado",
   "modules": [
