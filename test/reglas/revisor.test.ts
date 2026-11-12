@@ -105,6 +105,9 @@ describe.skipIf(!CON_SCRIPT)("el script del job «revisor»", () => {
     git(["config", "user.name", "Prueba"]);
     git(["config", "user.email", "prueba@example.com"]);
     git(["config", "commit.gpgsign", "false"]);
+    // La tarea de RAMA existe en la rama base, como las que deja el plan de una iniciativa.
+    mkdirSync(join(repo, ".diverger", "prestamos", "tasks"), { recursive: true });
+    writeFileSync(join(repo, ".diverger", "prestamos", "tasks", "TA-004.json"), "{\"id\": \"TA-004\"}\n");
     commit("inicio");
     git(["tag", "base"]);
   });
@@ -156,9 +159,44 @@ describe.skipIf(!CON_SCRIPT)("el script del job «revisor»", () => {
     expect(comprobar(RAMA, []).codigo).toBe(1);
   });
 
-  it("un commit con el trailer Diverger-Tarea hace de la PR la de una tarea en cualquier otra rama", () => {
+  it("un commit de persona con el trailer de una tarea del harness, como TA-164, no hace de la PR la de una tarea", () => {
+    commit("feat: ajuste del revisor", ["--trailer", "Diverger-Tarea: TA-164"]);
+    const r = comprobar("feature/x", []);
+    expect(r.codigo).toBe(0);
+    expect(r.salida).toContain("No es la PR de una tarea");
+    expect(r.llamada).toBe("");
+  });
+
+  it("la rama de un worker con una tarea que no existe en .diverger/ de la rama base no es de una tarea", () => {
+    commit("feat: TA-999", ["--trailer", "Diverger-Tarea: TA-999"]);
+    const r = comprobar("diverger/prestamos/TA-999", []);
+    expect(r.codigo).toBe(0);
+    expect(r.salida).toContain("la rama base no tiene .diverger/prestamos/tasks/TA-999.json");
+    expect(r.llamada).toBe("");
+  });
+
+  it("la tarea de otra iniciativa no cuenta: la rama dice de cuál es", () => {
     tarea();
-    expect(comprobar("feature/x", []).codigo).toBe(1);
+    const r = comprobar("diverger/otra/TA-004", []);
+    expect(r.codigo).toBe(0);
+    expect(r.salida).toContain(".diverger/otra/tasks/TA-004.json");
+  });
+
+  it("sin la aprobación, el mensaje dice que la salida es relanzar la tarea", () => {
+    tarea();
+    commit("Merge branch 'main' into diverger/prestamos/TA-004");
+    const r = comprobar(RAMA, []);
+    expect(r.codigo).toBe(1);
+    expect(r.errores).toContain("cierra la PR y relanza la tarea");
+  });
+
+  it("una rama de worker con un id de tarea que el worker no acepta no es de una tarea, aunque el fichero exista", () => {
+    writeFileSync(join(repo, ".diverger", "prestamos", "tasks", ".oculta.json"), "{}\n");
+    commit("feat: .oculta");
+    const r = comprobar("diverger/prestamos/.oculta", []);
+    expect(r.codigo).toBe(0);
+    expect(r.salida).toContain("No es la PR de una tarea");
+    expect(r.llamada).toBe("");
   });
 
   it.each([
