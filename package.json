@@ -8,7 +8,7 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "gen": "node scripts/generar-tipos.mjs",
+    "gen": "node scripts/generar-tipos.mjs && node scripts/generar-contextos.mjs",
     "lint": "eslint .",
     "lint:openapi": "node scripts/lint-openapi.mjs",
     "lint:deps": "depcruise app lib src web --config .dependency-cruiser.cjs",
