@@ -374,9 +374,13 @@ jobs:
         run: |
           gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
           docker tag aplicacion:ci "$IMAGEN"
-          docker push "$IMAGEN"
-          # Se despliega por su digest, que no cambia aunque alguien vuelva a usar la etiqueta.
-          echo "imagen=$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGEN")" >> "$GITHUB_OUTPUT"
+          docker push "$IMAGEN" | tee "$RUNNER_TEMP/push.log"
+          # Se despliega por su digest, que no cambia aunque alguien vuelva a usar la etiqueta. El digest es el que
+          # responde el registro al push: lo que Docker apunta en local puede ser otro nombre, como
+          # «aplicacion@sha256:…» de la imagen cargada, que Cloud Run buscaría en Docker Hub (#76).
+          digest=$(sed -nE 's/.*digest: (sha256:[0-9a-f]{64}).*/\1/p' "$RUNNER_TEMP/push.log" | tail -n 1)
+          test -n "$digest" || { echo "::error::docker push no ha dado el digest de $IMAGEN"; exit 1; }
+          echo "imagen=${IMAGEN%:*}@$digest" >> "$GITHUB_OUTPUT"
       - name: Manifiesto del servicio con la imagen nueva
         env:
           PROYECTO: ${{ steps.datos.outputs.proyecto }}
