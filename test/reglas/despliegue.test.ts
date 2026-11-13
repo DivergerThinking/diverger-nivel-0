@@ -1,9 +1,12 @@
 // Despliegue continuo en staging (EN-FM-04, ADR 0015 del harness): lo que se puede comprobar leyendo
 // los workflows y infra/ sin GCP. Que de verdad despliegue, y que un worker no pueda, se prueba en el
 // proyecto de pruebas (README, «Despliegue en staging»).
-import { readdirSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 const RAIZ = join(import.meta.dirname, "..", "..");
 const WORKFLOWS = join(RAIZ, ".github", "workflows");
@@ -68,7 +71,7 @@ describe("despliegue en staging", () => {
     expect(despliegue).toContain("docker load");
     expect(despliegue).not.toContain("docker build");
     expect(despliegue).toContain('docker push "$IMAGEN"');
-    expect(despliegue).toContain("{{index .RepoDigests 0}}");
+    expect(despliegue).not.toContain("RepoDigests");
     expect(despliegue).toContain("-docker.pkg.dev/$proyecto/$aplicacion/$aplicacion:$GITHUB_SHA");
   });
 
@@ -114,6 +117,63 @@ describe("despliegue en staging", () => {
   it("staging tiene el ID del cliente OAuth de Google", () => {
     const staging = leer("infra/staging.tfvars");
     expect(staging).toMatch(/^google_client_id\s*=\s*"\d+-[a-z0-9]+\.apps\.googleusercontent\.com"$/m);
+  });
+});
+
+// #76: desde el 12/11/2026, Docker apunta a la imagen cargada con «docker load» también el digest
+// «aplicacion@sha256:…», y va el primero en RepoDigests. Se desplegaba ese nombre sin registro, y Cloud Run
+// lo buscaba en Docker Hub. El paso se ejecuta aquí de verdad, con un docker falso que se porta así.
+const HAY_BASH = spawnSync("bash", ["-c", "true"]).status === 0;
+const PASOS = (parse(ci) as { jobs: { despliegue: { steps: { name?: string; run?: string }[] } } }).jobs.despliegue.steps;
+const SUBIR = PASOS.find((p) => p.name === "Subir la imagen a Artifact Registry")?.run ?? "";
+const REPOSITORIO = "europe-west1-docker.pkg.dev/proyecto/app/app";
+const DIGEST = "sha256:764fd04494e5456d5219aae381b8e7135939b627b4ac549d42ff0087126147b7";
+
+describe.skipIf(!HAY_BASH)("la imagen que se despliega (#76)", () => {
+  let dir = "";
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "despliegue-"));
+  });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  /** Ejecuta el paso con gcloud y docker falsos; push responde con «salidaPush». Devuelve el código y la imagen. */
+  function subir(salidaPush: string): { codigo: number | null; imagen: string; salida: string } {
+    const falso = (nombre: string, cuerpo: string) => {
+      writeFileSync(join(dir, nombre), `#!/usr/bin/env bash\n${cuerpo}\n`, { mode: 0o755 });
+    };
+    falso("gcloud", "exit 0");
+    falso(
+      "docker",
+      [
+        'case "$1" in',
+        `  push) printf '%s\\n' "The push refers to repository [${REPOSITORIO}]" "$SALIDA_PUSH" ;;`,
+        `  inspect) echo "aplicacion@${DIGEST}" ;;`,
+        "esac",
+      ].join("\n"),
+    );
+    const salida = join(dir, "salida");
+    writeFileSync(salida, "");
+    const orden = `PATH="$(cygpath -u "$BIN" 2>/dev/null || echo "$BIN"):$PATH"\n${SUBIR}`;
+    const r = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", orden], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, BIN: dir, RUNNER_TEMP: dir, GITHUB_OUTPUT: salida, REGION: "europe-west1", IMAGEN: `${REPOSITORIO}:abc123`, SALIDA_PUSH: salidaPush },
+    });
+    const imagen = /^imagen=(.*)$/m.exec(readFileSync(salida, "utf8"))?.[1] ?? "";
+    return { codigo: r.status, imagen, salida: r.stdout + r.stderr };
+  }
+
+  it("despliega el repositorio de Artifact Registry con el digest que da el push, no el nombre local", () => {
+    const r = subir(`abc123: digest: ${DIGEST} size: 856`);
+    expect(r.codigo, r.salida).toBe(0);
+    expect(r.imagen).toBe(`${REPOSITORIO}@${DIGEST}`);
+  });
+
+  it("falla si el push no da digest", () => {
+    const r = subir("abc123: pushed");
+    expect(r.codigo).not.toBe(0);
+    expect(r.salida).toContain("::error::");
+    expect(r.imagen).toBe("");
   });
 });
 
