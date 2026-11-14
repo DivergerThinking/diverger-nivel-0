@@ -30,6 +30,11 @@ export interface Datos {
     commits?: number; listaDeCommits?: { commit: { message: string }; author?: { login: string; type?: string } | null;
       committer?: { login: string; type?: string } | null }[];
     reviews?: { user: { login: string; type?: string }; state: string; commit_id?: string; author_association?: string }[] }>;
+  /** Cuántas veces responde 503 a cada ruta antes de contestar bien, como un fallo pasajero de la API (harness#794).
+   * Se gasta al responder; Infinity responde 503 siempre. */
+  fallos?: Record<string, number>;
+  /** El código con el que responde esos fallos; 503 si no se dice. */
+  codigoDeFallo?: number;
 }
 
 export const REPO = "DivergerThinking/app-de-prueba";
@@ -90,7 +95,15 @@ function responder(datos: Datos, url: URL): unknown {
 
 export async function arrancar(datos: Datos): Promise<{ url: string; servidor: Server }> {
   const servidor = createServer((peticion, respuesta) => {
-    const cuerpo = responder(datos, new URL(peticion.url ?? "/", "http://localhost"));
+    const url = new URL(peticion.url ?? "/", "http://localhost");
+    const quedan = datos.fallos?.[url.pathname] ?? 0;
+    if (quedan > 0 && datos.fallos) {
+      datos.fallos[url.pathname] = quedan - 1;
+      respuesta.writeHead(datos.codigoDeFallo ?? 503, { "Content-Type": "application/json" });
+      respuesta.end(JSON.stringify({ message: "Service Unavailable" }));
+      return;
+    }
+    const cuerpo = responder(datos, url);
     respuesta.writeHead(cuerpo ? 200 : 404, { "Content-Type": "application/json" });
     respuesta.end(JSON.stringify(cuerpo ?? { message: "Not Found" }));
   });

@@ -93,16 +93,48 @@ export async function persona(api, login) {
   return { login, id: usuario.id, nombre: nombreSeguro(usuario.name, login) };
 }
 
-/** Cliente mínimo de la API REST de GitHub con el token del job. */
+/** Intentos de cada lectura y espera antes del segundo, que se dobla en cada uno: 1 s y 2 s (harness#794). */
+export const INTENTOS = 3;
+export const ESPERA_MS = 1000;
+/** Tiempo máximo de cada intento: sin él, una API que acepta la conexión y no responde colgaría el job. */
+export const LIMITE_MS = 15000;
+
+/**
+ * Cliente mínimo de la API REST de GitHub con el token del job. Solo lee (GET), así que repetir es seguro: un 5xx o
+ * un fallo de la red se reintenta hasta INTENTOS veces, porque la API los da de vez en cuando justo al abrirse una PR
+ * (harness#794). También un cuerpo que no se puede leer o un intento que pasa de LIMITE_MS. Un 4xx no se reintenta:
+ * repetir no lo arregla.
+ */
 export function apiDeGitHub(token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? "",
-  base = process.env.GITHUB_API_URL ?? "https://api.github.com") {
+  base = process.env.GITHUB_API_URL ?? "https://api.github.com",
+  { intentos = INTENTOS, espera = ESPERA_MS, limite = LIMITE_MS,
+    dormir = (ms) => new Promise((listo) => setTimeout(listo, ms)) } = {}) {
   return async (path) => {
-    const respuesta = await fetch(`${base}/${path}`, {
-      headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    });
-    if (!respuesta.ok) throw new Error(`La API de GitHub responde ${respuesta.status} a ${path}`);
-    return respuesta.json();
+    for (let intento = 1; ; intento += 1) {
+      let respuesta;
+      let datos;
+      try {
+        respuesta = await fetch(`${base}/${path}`, {
+          headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          signal: AbortSignal.timeout(limite),
+        });
+        // El cuerpo se lee aquí: una conexión cortada a mitad o un cuerpo que no es JSON es un fallo pasajero más.
+        if (respuesta.ok) datos = await respuesta.json();
+      } catch (error) {
+        if (intento >= intentos) {
+          throw new Error(`La API de GitHub no responde a ${path}: ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error });
+        }
+        await dormir(espera * 2 ** (intento - 1));
+        continue;
+      }
+      if (respuesta.ok) return datos;
+      if (respuesta.status < 500 || intento >= intentos) {
+        throw new Error(`La API de GitHub responde ${respuesta.status} a ${path}`);
+      }
+      await dormir(espera * 2 ** (intento - 1));
+    }
   };
 }
 

@@ -19,6 +19,14 @@ module.exports = {
       to: { path: "^src/[^/]+/", pathNot: "^src/[^/]+/index[.]ts$" },
     },
     {
+      name: "pantallas-de-cada-contexto",
+      severity: "error",
+      comment:
+        "Las pantallas de un contexto (web/<id>/) no importan las de otro: cada tarea construye las suyas sin tocar las demás (ADR 0053 del harness). Lo común está en web/pantallas.ts.",
+      from: { path: "^web/([^/]+)/" },
+      to: { path: "^web/([^/]+)/", pathNot: "^web/$1/" },
+    },
+    {
       name: "contextos-sin-app-ni-web",
       severity: "error",
       comment: "Un contexto no depende del servidor ni del frontend.",

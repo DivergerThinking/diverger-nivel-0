@@ -3,6 +3,10 @@ dist/
 coverage/
 # Tipos generados desde los contratos OpenAPI: se regeneran con npm run gen.
 src/*/api.gen.ts
+# Registro de los contextos de src/: se regenera con npm run gen (golden-path#71).
+app/contextos.gen.ts
+# Registro de las pantallas de web/: se regenera con npm run gen (ADR 0053 del harness).
+web/pantallas.gen.ts
 .env
 .env.*
 *.log
