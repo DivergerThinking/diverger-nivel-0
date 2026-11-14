@@ -602,8 +602,13 @@ jobs:
           # larga que cualquier serie de comillas invertidas del texto: ahí GitHub no avisa a nadie por una @mención
           # ni enlaza nada (W9 de la auditoría, harness#598). Como terceros.fenced del núcleo.
           bloque() { jq -Rrs '([scan("`+") | length] | max // 0) as $m | ("`" * ([3, $m + 1] | max)) as $v | "\($v)text\n\(sub("\n+$"; ""))\n\($v)"' "$1"; }
+          # El intento dentro del job con que ha pasado: uno por fichero salida-<n>.json, como cuenta el coste. El bucle lo
+          # suma a sus lanzamientos al registrar los intentos de la tarea (harness#776). Va en su propia marca: la de la
+          # tarea la leen tal cual la retrospectiva y el informe de la ejecución.
+          intento=$(find "$RUNNER_TEMP" -maxdepth 1 -name 'salida-*.json' | wc -l | tr -d ' ')
           {
             echo "<!-- diverger:task=$TAREA;run=$EJECUCION -->"
+            echo "<!-- diverger:intento=$intento -->"
             echo "Tarea **$TAREA** de la iniciativa \`$INICIATIVA\`, ejecución \`$EJECUCION\`."
             echo
             echo "Lanzado por @$LANZADO_POR. Job del worker: $GITHUB_SERVER_URL/$repo/actions/runs/$GITHUB_RUN_ID"

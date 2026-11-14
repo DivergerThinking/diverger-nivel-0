@@ -193,15 +193,20 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   // La descripción, de la API y no del evento: un «Re-run» del job repite el evento con la descripción de entonces.
   // Solo se lee si la PR es del harness, así que las de las personas no dependen de la API.
   let cuerpo = process.env.PR_CUERPO;
+  let sinDescripcion = false;
   if (autor === HARNESS || lista.some(esDelHarness)) {
     try {
       cuerpo = await descripcionDeLaPr(api, process.env.GITHUB_REPOSITORY ?? "", process.env.PR_NUMERO, cuerpo);
     } catch (error) {
-      cuerpo = "";
+      // Sin la descripción no se sabe si dice «Lanzado por» ni qué job enlaza: solo se da este error, y no los que
+      // saldrían de tomarla como vacía, que hacen creer que el worker no dijo quién lo lanzó (harness#794).
+      sinDescripcion = true;
       errores.push(`No se puede leer la descripción de la PR: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  errores.push(...problemasDeLaPr(lista, { autor, cuerpo }), ...await comprobar(lista, () => {
+  if (!sinDescripcion) errores.push(...problemasDeLaPr(lista, { autor, cuerpo }));
+  errores.push(...await comprobar(lista, () => {
+    if (sinDescripcion) throw new Error("no se pudo leer la descripción de la PR");
     const ejecucion = ejecucionDelCuerpo(cuerpo);
     if (!ejecucion) throw new Error("la PR no enlaza el job del worker que la abrió");
     const rama = ramaDelWorker(process.env.PR_RAMA);

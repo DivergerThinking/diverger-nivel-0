@@ -5,7 +5,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 
 export default tseslint.config(
-  { ignores: ["dist/", "coverage/", "node_modules/", "src/*/api.gen.ts"] },
+  { ignores: ["dist/", "coverage/", "node_modules/", "src/*/api.gen.ts", "app/contextos.gen.ts", "web/pantallas.gen.ts"] },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {

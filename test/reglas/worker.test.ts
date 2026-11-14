@@ -352,6 +352,17 @@ describe("forma del workflow del worker", () => {
     expect(pr).toContain('--base "$GITHUB_REF_NAME"');
   });
 
+  // harness#776: el bucle solo veía los lanzamientos del job, y un worker que pasaba en su segundo intento dentro del
+  // job contaba 1. La PR dice con qué intento pasó, en una marca aparte de la de la tarea, que otros leen tal cual.
+  it("la PR dice en una marca aparte con qué intento dentro del job pasó, contado como el coste", () => {
+    const pr = paso("Rama y PR").run ?? "";
+    expect(pr).toContain('echo "<!-- diverger:intento=$intento -->"');
+    expect(pr).toContain(`intento=$(find "$RUNNER_TEMP" -maxdepth 1 -name 'salida-*.json' | wc -l | tr -d ' ')`);
+    // El mismo recuento que «\\(length) intentos» del coste: un fichero salida-<n>.json por intento (worker-modelo.sh).
+    expect(pr).toContain('"$RUNNER_TEMP"/salida-*.json');
+    expect(pr.indexOf("diverger:task=")).toBeLessThan(pr.indexOf("diverger:intento="));
+  });
+
   it("sin cambios solo sigue si el modelo dijo YA-CUBIERTA, y entonces la PR solo marca la tarea y lo explica (harness#538)", () => {
     const resultado = paso("Comprobar el resultado").run ?? "";
     expect(resultado).toMatch(
