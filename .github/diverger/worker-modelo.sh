@@ -7,7 +7,8 @@
 #   2 o más: sigue la misma sesión con la salida de las comprobaciones que fallaron en el intento anterior.
 # Son los intentos dentro del job. INTENTO_BUCLE es el del bucle (ADR 0029 del harness): en el 2 y el 3, el primer
 # intento del job recibe además el diagnóstico del job anterior ($RUNNER_TEMP/diagnostico-anterior.md).
-# Si el modelo termina con «BLOQUEADA:», el intento falla con ese motivo; con «YA-CUBIERTA:», deja el motivo en
+# Si el modelo termina con «BLOQUEADA:», el intento falla con ese motivo, salvo que lo que sigue niegue el bloqueo,
+# como «no aplica» (harness#846); con «YA-CUBIERTA:», deja el motivo en
 # $RUNNER_TEMP/cubierta (harness#538). Tras unas comprobaciones en rojo, la línea «FALLO:» con la causa que corrigió,
 # solo si va justo antes de la última, se añade a $RUNNER_TEMP/fallos, que «Comprobar el resultado» guarda en la tarea
 # (HU-NUC-20, harness#675 y harness#730).
@@ -153,7 +154,16 @@ tipo=$(jq -r .subtype "$RUNNER_TEMP/salida-$intento.json")
 # traía la salida de las comprobaciones, el modelo puede citarla en mitad de su respuesta (W6 de harness#596).
 ultima=$(jq -r .result "$RUNNER_TEMP/salida-$intento.json" | awk '{ sub(/\r$/, "") } NF { linea = $0 } END { print linea }')
 if printf '%s\n' "$ultima" | grep -qE '^(BLOQUEADA|BLOCKED):'; then
-  fallar "El worker se ha parado: $ultima"
+  # A veces el modelo usa el marcador para decir que no está bloqueado, como «BLOQUEADA: no aplica, la tarea sigue
+  # construida» (harness#846): eso no para el intento, que sigue a las comprobaciones, donde se ve si la tarea está
+  # hecha. Solo cuenta una negación entera: «no aplica» y parecidas, o «no», «ninguno» o «nada» seguidas de un signo
+  # de puntuación o del final. «BLOQUEADA: no existe src/equipos» es un bloqueo de verdad.
+  motivo=$(printf '%s\n' "$ultima" | sed -E 's/^(BLOQUEADA|BLOCKED):[[:space:]]*//' | tr '[:upper:]' '[:lower:]')
+  if printf '%s\n' "$motivo" | grep -qE '^(no aplica|no procede|n/a|not applicable|does not apply)([^[:alnum:]]|$)|^(no|ninguno|ninguna|nada|none|nothing)[[:space:]]*([.,;:]|$)'; then
+    echo "::notice::El worker ha escrito el marcador de bloqueo para decir que no está bloqueado, y el intento sigue a las comprobaciones: ${ultima:0:300}"
+  else
+    fallar "El worker se ha parado: $ultima"
+  fi
 fi
 # La tarea ya estaba hecha por otra anterior (harness#538): el modelo lo dice en una línea y no cambia nada. Se guarda
 # el motivo para que «Comprobar el resultado» abra una PR que solo marca la tarea. Solo vale el del último intento.
