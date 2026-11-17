@@ -1,0 +1,10 @@
+{
+  "excepciones": [
+    {
+      "aviso": "GHSA-fc5q-39xc-vjpf",
+      "paquete": "picomatch",
+      "motivo": "ReDoS en picomatch <=4.0.7, sin versión corregida el 18/11/2026. Solo llega por herramientas de desarrollo (vitest, vite, dependency-cruiser y typescript-eslint), que no van en la imagen. El patrón que lo dispara lo tendría que escribir quien ya puede cambiar el repositorio. Cuando picomatch publique la corrección, se actualiza package-lock.json y se quita esta excepción.",
+      "caduca": "2026-12-18"
+    }
+  ]
+}

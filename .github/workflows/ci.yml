@@ -52,7 +52,7 @@ jobs:
       - name: Tests
         run: npm test
       - name: Dependencias con vulnerabilidades conocidas (SCA)
-        run: npm audit --audit-level=high
+        run: node scripts/auditar-dependencias.mjs
 
   # Las comprobaciones como las ejecuta el worker (harness#533): npm run check con worker-comprobar.sh, en su
   # contenedor y con la imagen fijada en diverger-worker.yml. Así sale en la PR que lo rompe lo que solo falla
