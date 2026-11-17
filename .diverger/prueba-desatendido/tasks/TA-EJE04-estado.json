@@ -3,7 +3,7 @@
   "id": "TA-EJE04-estado",
   "title": "Estado: consultar el estado del servicio (GET /api/estado)",
   "story": "HU-AVI-02",
-  "status": "pending",
+  "status": "done",
   "context": "estado",
   "modules": [
     "src/estado"
