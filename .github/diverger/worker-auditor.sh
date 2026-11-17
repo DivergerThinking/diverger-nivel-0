@@ -30,6 +30,9 @@ fallar() {
 echo ninguno > "$RUNNER_TEMP/auditor"
 [ -n "${PLUGIN_QUALITY:-}" ] && [ -f "$PLUGIN_QUALITY/agents/auditor-seguridad.md" ] \
   || fallar "No está el agente auditor-seguridad de diverger-quality en ${PLUGIN_QUALITY:-?}"
+# diverger-quality depende del núcleo (ADR 0062 del harness): sin él a su lado, Claude Code no la carga (harness#877).
+[ -n "${PLUGIN_NUCLEO:-}" ] && [ -f "$PLUGIN_NUCLEO/.claude-plugin/plugin.json" ] \
+  || fallar "No está el núcleo en ${PLUGIN_NUCLEO:-?}: diverger-quality depende de él y Claude Code no la cargaría"
 [ -n "${CLAUDE_BIN:-}" ] && [ -x "$CLAUDE_BIN/claude" ] || fallar "No está Claude Code en ${CLAUDE_BIN:-?}"
 
 # El cambio del intento: lo que el worker ha dejado en las rutas que puede escribir, contra la rama base. Va fuera
@@ -81,7 +84,7 @@ instrucciones="Revisa la seguridad del cambio de la tarea $TAREA de la iniciativ
 
 lanzado=true
 "$CLAUDE_BIN/claude" -p "$instrucciones" \
-  --agent diverger-quality:auditor-seguridad --plugin-dir "$PLUGIN_QUALITY" \
+  --agent diverger-quality:auditor-seguridad --plugin-dir "$PLUGIN_QUALITY" --plugin-dir "$PLUGIN_NUCLEO" \
   --permission-mode dontAsk --tools "Read,Glob,Grep" --add-dir "$entrada" \
   --setting-sources user --strict-mcp-config \
   --max-turns 30 --max-budget-usd "$restante" \

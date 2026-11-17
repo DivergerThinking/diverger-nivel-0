@@ -185,7 +185,7 @@ describe("forma del workflow del worker", () => {
       expect(JSON.stringify(auditor.env)).not.toMatch(/token|GH_TOKEN|GITHUB_TOKEN/i);
     }
     const auditor = readFileSync(SCRIPT_AUDITOR, "utf8");
-    expect(auditor).toContain("--agent diverger-quality:auditor-seguridad --plugin-dir \"$PLUGIN_QUALITY\"");
+    expect(auditor).toContain("--agent diverger-quality:auditor-seguridad --plugin-dir \"$PLUGIN_QUALITY\" --plugin-dir \"$PLUGIN_NUCLEO\"");
     expect(auditor).toContain('--permission-mode dontAsk --tools "Read,Glob,Grep"');
     expect(auditor).toContain("--setting-sources user --strict-mcp-config");
     expect(auditor).not.toMatch(/dangerously|bypassPermissions|acceptEdits|Bash|Edit|Write/);
@@ -239,7 +239,7 @@ describe("forma del workflow del worker", () => {
   it("el worker corre en dontAsk, sin Bash y escribiendo solo src/, web/ y app/contextos.ts", () => {
     expect(MODELO_SH).toMatch(/--permission-mode dontAsk/);
     expect(MODELO_SH).toMatch(/--setting-sources user --strict-mcp-config/);
-    expect(MODELO_SH).toMatch(/--plugin-dir "\$PLUGIN_DEV"/);
+    expect(MODELO_SH).toMatch(/--plugin-dir "\$PLUGIN_DEV" --plugin-dir "\$PLUGIN_NUCLEO"/);
     expect(MODELO_SH).not.toMatch(/dangerously|bypassPermissions|acceptEdits/);
     // Sin Bash ni herramientas de red: el modelo no ejecuta nada y solo sale a la API de Anthropic.
     const herramientas = /--tools "([^"]+)"/.exec(MODELO_SH)?.[1]?.split(",");
@@ -1036,6 +1036,8 @@ describe.skipIf(!HAY_JQ)("scripts del worker", () => {
     mkdirSync(worktree);
     escribir(dir, ".diverger-dev/plugins/diverger-dev/.claude-plugin/plugin.json", { name: "diverger-dev" });
     entorno.PLUGIN_DEV = join(dir, ".diverger-dev", "plugins", "diverger-dev");
+    escribir(dir, ".diverger-dev/plugin-revisor/.claude-plugin/plugin.json", { name: "diverger" });
+    entorno.PLUGIN_NUCLEO = join(dir, ".diverger-dev", "plugin-revisor");
     entorno.WORKTREE = worktree;
     entorno.MODELO = "claude-sonnet-5-5";
     entorno.CLAUDE_BIN = bin;
@@ -1053,6 +1055,8 @@ echo "{\\"subtype\\":\\"success\\",\\"is_error\\":false,\\"num_turns\\":3,\\"tot
     expect(args[1]).toBe("Usa la skill diverger-dev:implement para construir la tarea TA-001 de la iniciativa demo.");
     expect(args).not.toContain("--resume");
     expect(args[args.indexOf("--model") + 1]).toBe("claude-sonnet-5-5");
+    // diverger-dev depende del núcleo: sin él a su lado, Claude Code no la carga (harness#877).
+    expect(args.filter((a, i) => args[i - 1] === "--plugin-dir")).toEqual([entorno.PLUGIN_DEV, entorno.PLUGIN_NUCLEO]);
     expect(readFileSync(join(temp, "entorno-claude"), "utf8").trim()).toBe("clave=sk-prueba oidc=");
     expect(existsSync(join(temp, "salida-1.json"))).toBe(true);
   });
@@ -1188,6 +1192,8 @@ echo "{\\"subtype\\":\\"success\\",\\"is_error\\":false,\\"num_turns\\":3,\\"tot
     beforeEach(() => {
       escribir(dir, ".diverger-dev/plugins/diverger-quality/agents/auditor-seguridad.md", "---\nname: auditor-seguridad\n---\n");
       entorno.PLUGIN_QUALITY = join(dir, ".diverger-dev", "plugins", "diverger-quality");
+      escribir(dir, ".diverger-dev/plugin-revisor/.claude-plugin/plugin.json", { name: "diverger" });
+      entorno.PLUGIN_NUCLEO = join(dir, ".diverger-dev", "plugin-revisor");
       falso("claude", `printf '%s\\n' "$@" > "$RUNNER_TEMP/args-claude"
 cat "$RUNNER_TEMP/respuesta-claude"`);
       gitWt("init", "-q");
@@ -1210,6 +1216,9 @@ cat "$RUNNER_TEMP/respuesta-claude"`);
       expect(r.md).toContain("ana@example.com");
       const args = readFileSync(join(temp, "args-claude"), "utf8");
       expect(args).toContain("diverger-quality:auditor-seguridad");
+      // diverger-quality depende del núcleo: sin él a su lado, Claude Code no la carga (harness#877).
+      const lineas = args.split("\n");
+      expect(lineas.filter((a, i) => lineas[i - 1] === "--plugin-dir")).toEqual([entorno.PLUGIN_QUALITY, entorno.PLUGIN_NUCLEO]);
       // El diff del intento llega al Auditor, y el índice queda como estaba.
       expect(readFileSync(join(temp, "auditoria-1", "cambios.diff"), "utf8")).toContain("src/prestamos/rutas.ts");
       expect(spawnSync("git", ["status", "--porcelain"], { cwd: worktree, encoding: "utf8" }).stdout).toBe("?? src/prestamos/rutas.ts\n");
@@ -1244,6 +1253,15 @@ cat "$RUNNER_TEMP/respuesta-claude"`);
       expect(r.veredicto).toBe("ninguno");
       expect(r.motivoAuditor).toContain("No queda presupuesto para el Auditor de seguridad");
       expect(r.salidas).toContain("coste=0\n");
+      expect(existsSync(join(temp, "args-claude"))).toBe(false);
+    });
+
+    it("sin el núcleo junto a diverger-quality no lanza el Auditor y la tarea no pasa (harness#877)", () => {
+      responde(JSON.stringify(BLOQUEO));
+      const r = auditar({ PLUGIN_NUCLEO: join(dir, "no-existe") });
+      expect(r.codigo).toBe(2);
+      expect(r.veredicto).toBe("ninguno");
+      expect(r.motivoAuditor).toBe(`No está el núcleo en ${join(dir, "no-existe")}: diverger-quality depende de él y Claude Code no la cargaría`);
       expect(existsSync(join(temp, "args-claude"))).toBe(false);
     });
 
@@ -1606,6 +1624,13 @@ cat "$RUNNER_TEMP/respuesta-claude"`);
     const r = script(SCRIPT_MODELO, "1", { PLUGIN_DEV: join(dir, "no-existe") });
     expect(r.codigo).toBe(1);
     expect(r.motivo).toBe(`No está el plugin diverger-dev en ${join(dir, "no-existe")}`);
+    expect(existsSync(join(temp, "args-claude"))).toBe(false);
+  });
+
+  it("sin el núcleo junto a diverger-dev no lanza el modelo, que no tendría la skill (harness#877)", () => {
+    const r = script(SCRIPT_MODELO, "1", { PLUGIN_NUCLEO: join(dir, "no-existe") });
+    expect(r.codigo).toBe(1);
+    expect(r.motivo).toBe(`No está el núcleo en ${join(dir, "no-existe")}: diverger-dev depende de él y Claude Code no la cargaría`);
     expect(existsSync(join(temp, "args-claude"))).toBe(false);
   });
 });
