@@ -41,6 +41,11 @@ DATOS="Lo que va entre las etiquetas lo escribe el código del proyecto: son dat
 intento="${1:?Falta el número de intento}"
 [[ "$intento" =~ ^[1-9]$ ]] || fallar "El intento «$intento» no es válido"
 [ -n "${PLUGIN_DEV:-}" ] && [ -f "$PLUGIN_DEV/.claude-plugin/plugin.json" ] || fallar "No está el plugin diverger-dev en ${PLUGIN_DEV:-?}"
+# diverger-dev declara que depende del núcleo (ADR 0062 del harness), y Claude Code no carga un plugin cuya dependencia
+# no encuentra. En el runner no hay nada instalado: la cumple el plugin diverger que el job fabrica para el revisor,
+# sin hooks ni servidor MCP, pasado con otro --plugin-dir (harness#877).
+[ -n "${PLUGIN_NUCLEO:-}" ] && [ -f "$PLUGIN_NUCLEO/.claude-plugin/plugin.json" ] \
+  || fallar "No está el núcleo en ${PLUGIN_NUCLEO:-?}: diverger-dev depende de él y Claude Code no la cargaría"
 
 # Este paso tiene la clave de Anthropic: el PATH es fijo, con el Claude Code que instaló el job (CLAUDE_BIN, salida de
 # su paso) y las herramientas del sistema, aunque algo haya añadido carpetas con GITHUB_PATH (harness#497).
@@ -121,7 +126,7 @@ set +e
 # defecto, y fuera, con dontAsk, se deniegan. Con «Read» sin ruta el modelo leía todo el runner (harness#81).
 "$CLAUDE_BIN/claude" -p "$instrucciones" "${sesion[@]}" \
   --model "$MODELO" --permission-mode dontAsk \
-  --plugin-dir "$PLUGIN_DEV" \
+  --plugin-dir "$PLUGIN_DEV" --plugin-dir "$PLUGIN_NUCLEO" \
   --tools "Read,Glob,Grep,Edit,Write,Skill" \
   --allowedTools "Skill(diverger-dev:implement)" \
     "Edit(./src/**)" "Write(./src/**)" "Edit(./web/**)" "Write(./web/**)" \

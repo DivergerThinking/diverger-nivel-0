@@ -250,7 +250,8 @@ jobs:
             plugins/diverger/agents
             plugins/diverger/server
       # Del núcleo solo hace falta el agente revisor-codigo (EN-OPS-08): va en un plugin con el nombre del núcleo y sin
-      # nada más, para que no se carguen sus hooks ni su servidor MCP.
+      # nada más, para que no se carguen sus hooks ni su servidor MCP. El worker y el Auditor también lo cargan, porque
+      # diverger-dev y diverger-quality dependen del núcleo y Claude Code no las carga sin él (harness#877).
       - name: Plugin del revisor de código
         run: |
           mkdir -p "$PLUGIN_NUCLEO/.claude-plugin" "$PLUGIN_NUCLEO/agents"
