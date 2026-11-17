@@ -70,14 +70,16 @@ export async function api<T>(sesion: Sesion, ruta: string, opciones: { metodo?: 
 }
 
 /**
- * Una pantalla solo para quien puede hacer una operación de lectura: la llama, y la pantalla no se enseña si la API
- * responde 401 o 403. Sirve, por ejemplo, para las pantallas de IT sin añadir al contrato una ruta que diga el rol: la de
- * los préstamos vencidos, que solo puede leer IT, dice si la persona es de IT.
+ * Una pantalla solo para quien puede hacer una operación de lectura: la llama, y la pantalla solo se enseña si la API
+ * responde bien. Con un 401 o un 403, con cualquier otro error (un 500, o un 404 porque la ruta aún no existe) o sin red,
+ * no se enseña: ante la duda, la pantalla de un rol no la ve nadie más (harness#847). Sirve, por ejemplo, para las
+ * pantallas de IT sin añadir al contrato una ruta que diga el rol: la de los préstamos vencidos, que solo puede leer IT,
+ * dice si la persona es de IT. La ruta puede ser de otro contexto, por ejemplo para la pantalla del alta de equipos.
  */
 export function siPuedeLlamar(ruta: string): (sesion: Sesion) => Promise<boolean> {
   return (sesion) =>
     api(sesion, ruta).then(
       () => true,
-      (motivo: unknown) => !(motivo instanceof ErrorDeLaApi && (motivo.status === 401 || motivo.status === 403)),
+      () => false,
     );
 }
