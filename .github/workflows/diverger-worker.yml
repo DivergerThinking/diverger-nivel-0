@@ -248,6 +248,7 @@ jobs:
             plugins/diverger-dev
             plugins/diverger-quality
             plugins/diverger/agents
+            plugins/diverger/server
       # Del núcleo solo hace falta el agente revisor-codigo (EN-OPS-08): va en un plugin con el nombre del núcleo y sin
       # nada más, para que no se carguen sus hooks ni su servidor MCP.
       - name: Plugin del revisor de código
@@ -255,6 +256,28 @@ jobs:
           mkdir -p "$PLUGIN_NUCLEO/.claude-plugin" "$PLUGIN_NUCLEO/agents"
           echo '{"name": "diverger"}' > "$PLUGIN_NUCLEO/.claude-plugin/plugin.json"
           cp .diverger-dev/plugins/diverger/agents/revisor-codigo.md "$PLUGIN_NUCLEO/agents/"
+
+      # La tarjeta de la tarea pasa a «En curso» en sus Projects (HU-EJE-10, ADR 0063 del harness), con tarjetas.py del
+      # núcleo. El token de la App solo puede escribir en los Projects de la organización y leer las issues; lo usa solo
+      # el paso siguiente, cuyo env no pasa a los demás, y la acción lo revoca al terminar el job. Sin el permiso en la
+      # App, o con GitHub caído, el job sigue y lo dice en su resumen.
+      - name: Token del Project, al empezar
+        id: token-tarjeta
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.DIVERGER_HARNESS_APP_ID }}
+          private-key: ${{ secrets.DIVERGER_HARNESS_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-issues: read
+          permission-organization-projects: write
+      - name: Tarjeta a En curso
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.token-tarjeta.outputs.token }}
+          TARJETAS_PY: ${{ github.workspace }}/.diverger-dev/plugins/diverger/server/tarjetas.py
+        run: bash "$GITHUB_WORKSPACE/.github/diverger/worker-tarjeta.sh" in-progress
 
       # Tres intentos como mucho. En cada uno, el modelo trabaja (worker-modelo.sh) y después el job
       # ejecuta las comprobaciones en otro paso, sin la clave de Anthropic (worker-comprobar.sh). Los
@@ -655,6 +678,26 @@ jobs:
             echo "::warning::No se ha podido activar el auto-merge (¿«Allow auto-merge» desactivado?): alguien tiene que integrar $url"
           fi
 
+      # Con la PR abierta, su tarjeta pasa a «En revisión» (HU-EJE-10). Otro token, pedido ahora: el del principio puede
+      # haber caducado, porque el job dura hasta una hora.
+      - name: Token del Project, con la PR
+        id: token-tarjeta-pr
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.DIVERGER_HARNESS_APP_ID }}
+          private-key: ${{ secrets.DIVERGER_HARNESS_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-issues: read
+          permission-organization-projects: write
+      - name: Tarjeta a En revisión
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.token-tarjeta-pr.outputs.token }}
+          TARJETAS_PY: ${{ github.workspace }}/.diverger-dev/plugins/diverger/server/tarjetas.py
+        run: bash "$GITHUB_WORKSPACE/.github/diverger/worker-tarjeta.sh" in-review
+
       # El diagnóstico para el intento siguiente (ADR 0029 del harness): siempre, también si el job falla. Lleva el del
       # intento anterior dentro, así que el tercero ve los dos.
       - name: Diagnóstico para el intento siguiente
@@ -772,6 +815,10 @@ jobs:
             fi
             if [ "$TELEMETRIA" = true ]; then
               printf '\nTelemetría en BigQuery con github.run_id=%s.\n' "$GITHUB_RUN_ID"
+            fi
+            if [ -s "$RUNNER_TEMP/tarjetas" ]; then
+              printf '\nTarjeta del Project (HU-EJE-10):\n'
+              sed 's/^/- /' "$RUNNER_TEMP/tarjetas"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           cat "$GITHUB_STEP_SUMMARY"

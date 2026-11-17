@@ -1,0 +1,99 @@
+name: diverger-tarjeta
+run-name: diverger-tarjeta ${{ github.event.pull_request.head.ref }}
+
+# Al integrarse la PR de una tarea, su tarjeta pasa a «Hecho» en sus GitHub Projects (HU-EJE-10, ADR 0063 del harness).
+# «En curso» y «En revisión» los pone el job del worker; esto cubre los Projects sin el flujo «Pull request merged».
+#
+# Solo actúa sobre una PR integrada desde una rama diverger/<iniciativa>/<tarea> de este mismo repositorio, nunca desde
+# un fork. No ejecuta nada de la PR: la tarea sale del nombre de la rama, que se comprueba antes de usarlo, y quien mueve
+# la tarjeta es tarjetas.py del núcleo, descargado del harness con un token de la App que solo lee su contenido. El
+# token que escribe en el Project solo puede escribir en los Projects de la organización y leer las issues. Sin el
+# permiso en la App, el job termina bien y lo dice en su resumen: una tarjeta nunca falla una integración.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  hecho:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'diverger/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # Solo para leer .diverger/settings.json de la rama base: el idioma de los mensajes.
+    env:
+      RAMA: ${{ github.event.pull_request.head.ref }}
+      HARNESS_REF: ${{ vars.DIVERGER_HARNESS_REF || 'main' }}
+    steps:
+      # La rama llega de fuera: se comprueba antes de usarla y nunca se pega en un script.
+      - name: Tarea de la rama
+        id: tarea
+        run: |
+          [[ "$HARNESS_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || { echo "::error::DIVERGER_HARNESS_REF no es válida"; exit 1; }
+          if [[ "$RAMA" =~ ^diverger/([a-z0-9][a-z0-9-]{0,63})/([A-Za-z0-9][A-Za-z0-9._-]{0,63})$ ]] \
+            && [[ "${BASH_REMATCH[1]}" != reinicio && "${BASH_REMATCH[1]}" != ajustes ]]; then
+            echo "iniciativa=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "tarea=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "La rama $RAMA no es la de una tarea: no hay tarjeta que mover." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # La rama base, ya con la PR integrada: el script de la tarjeta y los ajustes son los suyos.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.tarea.outputs.tarea != ''
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          persist-credentials: false
+          sparse-checkout: |
+            .diverger
+            .github/diverger
+
+      - name: Token de lectura del núcleo
+        id: token-nucleo
+        if: steps.tarea.outputs.tarea != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.DIVERGER_HARNESS_APP_ID }}
+          private-key: ${{ secrets.DIVERGER_HARNESS_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: Diverger-ExP-Harness
+          permission-contents: read
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.token-nucleo.outputs.token != ''
+        continue-on-error: true
+        with:
+          repository: ${{ github.repository_owner }}/Diverger-ExP-Harness
+          ref: ${{ env.HARNESS_REF }}
+          token: ${{ steps.token-nucleo.outputs.token }}
+          path: .diverger-nucleo
+          persist-credentials: false
+          sparse-checkout: plugins/diverger/server
+
+      - name: Token del Project
+        id: token-tarjeta
+        if: steps.tarea.outputs.tarea != ''
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.DIVERGER_HARNESS_APP_ID }}
+          private-key: ${{ secrets.DIVERGER_HARNESS_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-issues: read
+          permission-organization-projects: write
+      - name: Tarjeta a Hecho
+        if: steps.tarea.outputs.tarea != ''
+        env:
+          GH_TOKEN: ${{ steps.token-tarjeta.outputs.token }}
+          INICIATIVA: ${{ steps.tarea.outputs.iniciativa }}
+          TAREA: ${{ steps.tarea.outputs.tarea }}
+          TARJETAS_PY: ${{ github.workspace }}/.diverger-nucleo/plugins/diverger/server/tarjetas.py
+        run: |
+          bash "$GITHUB_WORKSPACE/.github/diverger/worker-tarjeta.sh" done
+          { echo "## diverger-tarjeta $TAREA"; cat "$RUNNER_TEMP/tarjetas"; } >> "$GITHUB_STEP_SUMMARY"

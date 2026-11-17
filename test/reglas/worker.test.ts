@@ -117,7 +117,7 @@ describe("forma del workflow del worker", () => {
       token: "${{ steps.token-dev.outputs.token }}",
       path: ".diverger-dev",
       "persist-credentials": false,
-      "sparse-checkout": "plugins/diverger-dev\nplugins/diverger-quality\nplugins/diverger/agents\n",
+      "sparse-checkout": "plugins/diverger-dev\nplugins/diverger-quality\nplugins/diverger/agents\nplugins/diverger/server\n",
     });
     expect(indice("token-dev")).toBeLessThan(indice("Worker"));
     // El token de lectura solo lo usa la descarga: ningún otro paso lo cita.
@@ -135,12 +135,17 @@ describe("forma del workflow del worker", () => {
         .toEqual(["ANTHROPIC_API_KEY", "BASH_ENV", "CLAUDE_BIN", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "ENV", "TOPE_JOB"]);
       expect(paso(nombre).run).toMatch(/^bash "\$GITHUB_WORKSPACE\/\.github\/diverger\/worker-modelo\.sh" [123]$/);
     }
-    // La única excepción es «Quién lanzó la ejecución» (EN-OPS-07): el token del job, que solo lee el contenido y las
-    // ejecuciones, en el env de ese paso, que no pasa a los siguientes. id-token solo sirve para entrar en GCP.
+    // Las excepciones son «Quién lanzó la ejecución» (EN-OPS-07), con el token del job, que solo lee el contenido y las
+    // ejecuciones, y «Tarjeta a En curso» (HU-EJE-10), con el de la App que solo escribe en los Projects. Van en el env
+    // de su paso, que no pasa a los siguientes. id-token solo sirve para entrar en GCP.
     expect(JOB.permissions).toEqual({ contents: "read", actions: "read", "id-token": "write", statuses: "write" });
     for (const anterior of PASOS.slice(0, indice("Worker"))) {
       if (anterior.name === "Quién lanzó la ejecución") {
         expect(anterior.env).toEqual({ GH_TOKEN: "${{ github.token }}" });
+        continue;
+      }
+      if (anterior.name === "Tarjeta a En curso") {
+        expect(anterior.env?.GH_TOKEN).toBe("${{ steps.token-tarjeta.outputs.token }}");
         continue;
       }
       expect(JSON.stringify(anterior.env ?? {})).not.toMatch(/token|GH_TOKEN|GITHUB_TOKEN/i);
@@ -486,6 +491,31 @@ describe("forma del workflow del worker", () => {
     expect(paso("Parar el Collector").run).toContain("docker stop -t 30 otel");
     expect(indice("Parar el Collector")).toBeGreaterThan(indice("Rama y PR"));
     expect(indice("Parar el Collector")).toBeLessThan(indice("Eliminar el worktree"));
+  });
+
+  it("mueve la tarjeta a En curso antes del worker y a En revisión con la PR, sin parar el job (HU-EJE-10)", () => {
+    for (const [token, tarjeta, columna] of [
+      ["token-tarjeta", "Tarjeta a En curso", "in-progress"],
+      ["token-tarjeta-pr", "Tarjeta a En revisión", "in-review"],
+    ] as const) {
+      const t = paso(token);
+      expect(t.uses).toMatch(/^actions\/create-github-app-token@[0-9a-f]{40}$/);
+      expect(t["continue-on-error"]).toBe(true);
+      const permisos = Object.entries(t.with ?? {}).filter(([clave]) => clave.startsWith("permission-"));
+      expect(Object.fromEntries(permisos)).toEqual({ "permission-issues": "read", "permission-organization-projects": "write" });
+      expect(t.with?.repositories).toBe("${{ github.event.repository.name }}");
+      const p = paso(tarjeta);
+      expect(indice(tarjeta)).toBe(indice(token) + 1);
+      expect(p["continue-on-error"]).toBe(true);
+      expect(p.env?.GH_TOKEN).toBe(`\${{ steps.${token}.outputs.token }}`);
+      expect(p.run).toBe(`bash "$GITHUB_WORKSPACE/.github/diverger/worker-tarjeta.sh" ${columna}`);
+      // Cada token del Project solo lo usa su paso.
+      expect(TEXTO.split(`steps.${token}.outputs.token`)).toHaveLength(2);
+    }
+    expect(indice("Tarjeta a En curso")).toBeGreaterThan(indice("token-dev") + 1);
+    expect(indice("Tarjeta a En curso")).toBeLessThan(indice("Worker"));
+    expect(indice("token-tarjeta-pr")).toBe(indice("Rama y PR") + 1);
+    expect(paso("Resumen").run).toContain(`sed 's/^/- /' "$RUNNER_TEMP/tarjetas"`);
   });
 
   it("elimina el worktree y escribe el resumen siempre, al final", () => {

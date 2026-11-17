@@ -29,6 +29,17 @@ export function contextosConPantallas(raiz = ".") {
   return ids.sort();
 }
 
+/** La carpeta de la pantalla de ejemplo de la plantilla, que enseña cómo se hace una. */
+export const EJEMPLO = "ejemplo";
+
+/**
+ * Los contextos cuyas pantallas enseña la aplicación: todos menos el ejemplo de la plantilla cuando hay otros. Así, la
+ * plantilla enseña su ejemplo, y una aplicación generada no lo enseña en cuanto tiene pantallas suyas (harness#847).
+ */
+export function deLaAplicacion(ids) {
+  return ids.length > 1 ? ids.filter((id) => id !== EJEMPLO) : ids;
+}
+
 /** El código del registro con las pantallas de los contextos `ids`, en ese orden. */
 export function registro(ids) {
   const lineas = [
@@ -45,7 +56,7 @@ export function registro(ids) {
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   let ids;
   try {
-    ids = contextosConPantallas();
+    ids = deLaAplicacion(contextosConPantallas());
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);

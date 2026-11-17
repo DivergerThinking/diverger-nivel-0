@@ -54,6 +54,23 @@ describe("registro de las pantallas", () => {
     expect(r.registro).toContain("export const pantallas: Pantalla[] = [];");
   });
 
+  it("con pantallas de otro contexto, no registra las del ejemplo de la plantilla (harness#847)", () => {
+    pantallas("ejemplo");
+    pantallas("prestamos");
+    const r = generar();
+    expect(r.codigo, r.errores).toBe(0);
+    expect(r.registro).not.toContain("ejemplo");
+    expect(r.registro).toContain("export const pantallas: Pantalla[] = [...pantallas0];");
+    expect(r.salida).toContain("prestamos");
+  });
+
+  it("si el ejemplo es lo único que hay, como en la plantilla, lo registra", () => {
+    pantallas("ejemplo");
+    const r = generar();
+    expect(r.codigo, r.errores).toBe(0);
+    expect(r.registro).toContain('from "./ejemplo/index.js";');
+  });
+
   it("falla y lo dice si una carpeta con index.tsx no tiene nombre de contexto", () => {
     pantallas("Prestamos");
     const r = generar();
