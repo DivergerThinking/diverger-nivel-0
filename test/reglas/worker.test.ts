@@ -1620,6 +1620,43 @@ cat "$RUNNER_TEMP/respuesta-claude"`);
     expect(r.motivo).toBe("El worker se ha parado: BLOQUEADA: hace falta cambiar spec/");
   });
 
+  // El worker de diverger-nivel-1#168 corrigió el lint y terminó con «BLOQUEADA: no aplica, la tarea sigue construida»:
+  // usó el marcador para decir que no estaba bloqueado, y la tarea se quedó bloqueada sin pasar las comprobaciones.
+  it.each([
+    "BLOQUEADA: no aplica, la tarea sigue construida; falta confirmar que el resto de `npm run check` pasa.",
+    "BLOQUEADA: No aplica.",
+    "BLOQUEADA: no procede",
+    "BLOQUEADA: no",
+    "BLOQUEADA: no.",
+    "BLOQUEADA: ninguno",
+    "BLOQUEADA: nada; la tarea queda construida",
+    "BLOQUEADA: N/A",
+    "BLOCKED: not applicable, the task is built",
+    "BLOCKED: none",
+  ])("un marcador que niega el bloqueo no para el intento, que sigue a las comprobaciones: «%s» (harness#846)", (ultima) => {
+    writeFileSync(join(temp, "salida-1.json"), JSON.stringify({ session_id: "s-1" }));
+    writeFileSync(join(temp, "comprobaciones-1.log"), "web/prestamos/Mostrador.tsx: 'FormEvent' is deprecated\n");
+    const r = script(SCRIPT_MODELO, "2", { RESULTADO: `He corregido el lint.\\nFALLO: el lint rechazó FormEvent\\n${ultima}` });
+    expect(r.motivo).toBe("");
+    expect(r.codigo).toBe(0);
+    expect(r.salida).toContain("::notice::El worker ha escrito el marcador de bloqueo para decir que no está bloqueado");
+    // La línea FALLO de antes de la última se guarda igual.
+    expect(readFileSync(join(temp, "fallos"), "utf8")).toBe("FALLO: el lint rechazó FormEvent\n");
+  });
+
+  it.each([
+    "BLOQUEADA: no existe src/equipos/index.ts y la tarea lo importa",
+    "BLOQUEADA: no puedo construir la pantalla sin cambiar web/App.tsx",
+    "BLOQUEADA: nada exporta listarEquipos en src/equipos",
+    "BLOQUEADA: ninguna tarea construye el contexto equipos",
+    "BLOCKED: no route in the contract matches the story",
+    "BLOCKED: nothing exports listarEquipos",
+  ])("un bloqueo de verdad que empieza por una negación sigue parando el intento: «%s» (harness#846)", (ultima) => {
+    const r = script(SCRIPT_MODELO, "1", { RESULTADO: ultima });
+    expect(r.codigo).toBe(1);
+    expect(r.motivo).toBe(`El worker se ha parado: ${ultima}`);
+  });
+
   it("sin el plugin descargado no lanza el modelo", () => {
     const r = script(SCRIPT_MODELO, "1", { PLUGIN_DEV: join(dir, "no-existe") });
     expect(r.codigo).toBe(1);
