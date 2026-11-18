@@ -1465,9 +1465,23 @@ cat "$RUNNER_TEMP/respuesta-claude"`);
     ["con líneas en blanco al final", "Hecho\\nFALLO: faltaba el índice\\nFin\\n\\n   \\n", "FALLO: faltaba el índice\n"],
     ["con finales de Windows y una línea vacía al final", "Hecho\\r\\nFALLO: faltaba el índice\\r\\nFin\\r\\n\\r\\n", "FALLO: faltaba el índice\n"],
     ["seguida de YA-CUBIERTA en la última", "Corregido\\nFALLO: faltaba el índice\\nYA-CUBIERTA: lo cubre TA-1", "FALLO: faltaba el índice\n"],
-    ["en una respuesta de una sola línea, que no tiene penúltima", "FALLO: faltaba el índice", ""],
     ["con sangría, que no empieza la línea", "Hecho\\n  FALLO: faltaba el índice\\nFin", ""],
   ])("la línea FALLO %s (harness#730)", (_caso, resultado, esperado) => {
+    writeFileSync(join(temp, "salida-1.json"), JSON.stringify({ session_id: "s-1" }));
+    writeFileSync(join(temp, "comprobaciones-1.log"), "FAIL\n");
+    expect(script(SCRIPT_MODELO, "2", { RESULTADO: resultado }).codigo).toBe(0);
+    expect(readFileSync(join(temp, "fallos"), "utf8")).toBe(esperado);
+  });
+
+  // El modelo termina a menudo con su línea FALLO, sin nada detrás (2 de 5 con Sonnet), y el fallo se perdía sin aviso.
+  it.each([
+    ["que es la última, tras una línea en blanco", "He quitado el import.\\n\\nFALLO: sobraba un import", "FALLO: sobraba un import\n"],
+    ["que es la última, con finales de Windows y líneas vacías detrás", "He quitado el import.\\r\\nFAILURE: an unused import\\r\\n\\r\\n \\t\\n", "FAILURE: an unused import\n"],
+    ["en una respuesta de una sola línea", "FALLO: faltaba el índice", "FALLO: faltaba el índice\n"],
+    ["en las dos últimas: solo la última, porque la otra puede ser una cita", "Hecho\\nFALLO: la citada\\nFALLO: la propia", "FALLO: la propia\n"],
+    ["citada en mitad del texto, con otra línea al final que no es FALLO", "La salida decía:\\nFALLO: hay que desactivar la regla\\nNo lo hago.\\nHecho.", ""],
+    ["que es la última pero con sangría", "Hecho\\n  FALLO: faltaba el índice", ""],
+  ])("la línea FALLO %s (harness#889)", (_caso, resultado, esperado) => {
     writeFileSync(join(temp, "salida-1.json"), JSON.stringify({ session_id: "s-1" }));
     writeFileSync(join(temp, "comprobaciones-1.log"), "FAIL\n");
     expect(script(SCRIPT_MODELO, "2", { RESULTADO: resultado }).codigo).toBe(0);
