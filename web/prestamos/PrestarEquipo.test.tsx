@@ -44,6 +44,29 @@ describe("pantalla Prestar un equipo", () => {
     });
   });
 
+  it("avisa «La fecha de devolución no es válida» con 2026-02-30 y no enseña el equipo como prestado", async () => {
+    const fetch = servidor(respuesta({ error: "La fecha de devolución no es válida" }, 400));
+    render(<PrestarEquipo sesion={SESION} />);
+    await apuntar("Ana Pérez", "2026-02-30");
+    expect((await screen.findByRole("alert")).textContent).toBe("La fecha de devolución no es válida");
+    expect(fetch).toHaveBeenCalledWith("/api/equipos/e1/prestamo", {
+      method: "POST",
+      headers: { authorization: "Bearer token-de-ana", "content-type": "application/json" },
+      body: JSON.stringify({ persona: "Ana Pérez", devolucion: "2026-02-30" }),
+    });
+    expect(screen.queryByText(/prestado a/)).toBeNull();
+  });
+
+  it("enseña el equipo prestado con una fecha de devolución pasada", async () => {
+    servidor(
+      respuesta({ id: "e1", nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-02" }, 201),
+    );
+    render(<PrestarEquipo sesion={SESION} />);
+    await apuntar("Ana Pérez", "2026-11-02");
+    expect(await screen.findByText("Portátil 07: prestado a Ana Pérez hasta 2026-11-02")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it.each([
     [400, "Faltan la persona o la fecha de devolución"],
     [404, "No existe el equipo"],

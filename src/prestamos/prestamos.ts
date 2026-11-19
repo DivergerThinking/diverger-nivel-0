@@ -7,6 +7,7 @@ export type EquipoConPrestamo = components["schemas"]["EquipoConPrestamo"];
 export type EquipoPrestado = components["schemas"]["EquipoPrestado"];
 
 export const FALTAN_DATOS = "Faltan la persona o la fecha de devolución";
+export const FECHA_NO_VALIDA = "La fecha de devolución no es válida";
 export const NO_EXISTE_EL_EQUIPO = "No existe el equipo";
 export const YA_PRESTADO = "El equipo ya está prestado";
 
@@ -26,6 +27,15 @@ export const COLECCION_PRESTAMOS = "prestamos_activos";
 
 const hayTexto = (valor: unknown): valor is string => typeof valor === "string" && valor.trim() !== "";
 
+/** Texto AAAA-MM-DD que es una fecha del calendario («2026-02-30» no lo es). Las fechas pasadas valen. */
+export function esFechaQueExiste(texto: string): boolean {
+  const partes = /^(\d{4})-(\d{2})-(\d{2})$/.exec(texto);
+  if (!partes) return false;
+  const [anio, mes, dia] = [Number(partes[1]), Number(partes[2]), Number(partes[3])];
+  const fecha = new Date(Date.UTC(anio, mes - 1, dia));
+  return fecha.getUTCFullYear() === anio && fecha.getUTCMonth() === mes - 1 && fecha.getUTCDate() === dia;
+}
+
 /**
  * Apunta el préstamo de un equipo. Leer el equipo y el préstamo activo y guardar el nuevo van en una sola
  * transacción, para que dos peticiones a la vez no presten el mismo equipo dos veces.
@@ -38,6 +48,9 @@ export async function prestarEquipo(
 ): Promise<ResultadoPrestamo> {
   if (!hayTexto(persona) || !hayTexto(devolucion)) {
     return { ok: false, status: 400, error: FALTAN_DATOS };
+  }
+  if (!esFechaQueExiste(devolucion)) {
+    return { ok: false, status: 400, error: FECHA_NO_VALIDA };
   }
   return almacen.transaccion<ResultadoPrestamo>(async (tx) => {
     const equipo = await obtenerEquipo(tx, equipoId);

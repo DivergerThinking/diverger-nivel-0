@@ -52,6 +52,28 @@ describe("POST /api/equipos/{id}/prestamo", () => {
     }
   });
 
+  it("responde 400 «La fecha de devolución no es válida» con una fecha que no existe y no presta el equipo", async () => {
+    const { alta, apuntar, lista } = await servidor();
+    const id = await alta("Portátil 07");
+    for (const devolucion of ["2026-02-30", "2026-13-01", "2026-00-10", "2025-02-29", "20-11-2026", "mañana", " 2026-11-20"]) {
+      const respuesta = await apuntar(id, { persona: "Ana Pérez", devolucion });
+      expect(respuesta.statusCode).toBe(400);
+      expect(respuesta.json()).toEqual({ error: "La fecha de devolución no es válida" });
+    }
+    expect((await lista()).json()).toEqual([{ id, nombre: "Portátil 07", prestado: false }]);
+  });
+
+  it("acepta una fecha pasada y el 29 de febrero de un año bisiesto, y la devuelve igual", async () => {
+    const { alta, apuntar, lista } = await servidor();
+    const id = await alta("Portátil 07");
+    const pasada = await apuntar(id, { persona: "Ana Pérez", devolucion: "2026-11-02" });
+    expect(pasada.statusCode).toBe(201);
+    expect(pasada.json()).toEqual({ id, nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-02" });
+    expect((await lista()).json()).toEqual([pasada.json()]);
+    const otro = await alta("Portátil 08");
+    expect((await apuntar(otro, { persona: "Luis Gómez", devolucion: "2028-02-29" })).statusCode).toBe(201);
+  });
+
   it("responde 409 «El equipo ya está prestado» y conserva el préstamo anterior", async () => {
     const { alta, apuntar, lista } = await servidor();
     const id = await alta("Portátil 07");
