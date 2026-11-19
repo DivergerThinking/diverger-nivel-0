@@ -44,6 +44,16 @@ resource "google_cloud_run_v2_service" "aplicacion" {
         value = var.google_client_id
       }
 
+      # Las propias de la aplicación, de infra/staging.tfvars (harness#430): por ejemplo, la lista de
+      # cuentas de IT del nivel 1 en CORREOS_IT. Una aplicación no cambia infra/ sin una persona.
+      dynamic "env" {
+        for_each = var.variables_entorno
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+
       startup_probe {
         http_get {
           path = "/api/salud"

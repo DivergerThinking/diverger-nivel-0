@@ -1,7 +1,7 @@
 // Puerto de persistencia (HU-GP-01): el almacén en memoria y el adaptador de Firestore cumplen el mismo
 // contrato. El de Firestore se prueba con un cliente de mentira con la misma forma.
 import { describe, expect, it } from "vitest";
-import { almacenEnMemoria, type Almacen } from "./datos.js";
+import { almacenEnMemoria, LEER_TRAS_ESCRIBIR, type Almacen, type Transaccion } from "./datos.js";
 import { almacenFirestore, type ClienteFirestore } from "./firestore.js";
 
 interface Equipo {
@@ -9,7 +9,7 @@ interface Equipo {
   prestado: boolean;
 }
 
-/** Firestore de mentira en memoria, con transacciones de una en una. */
+/** Firestore de mentira en memoria, con transacciones de una en una; como el real, no deja leer tras escribir. */
 function firestoreDeMentira(): ClienteFirestore {
   const datos = new Map<string, unknown>();
   const instantanea = (clave: string) => ({ exists: datos.has(clave), data: () => structuredClone(datos.get(clave)) });
@@ -33,7 +33,10 @@ function firestoreDeMentira(): ClienteFirestore {
     runTransaction: async (trabajo: (t: unknown) => Promise<unknown>) => {
       const escrituras: (() => void)[] = [];
       const resultado = await trabajo({
-        get: (d: { clave: string }) => Promise.resolve(instantanea(d.clave)),
+        get: (d: { clave: string }) => {
+          if (escrituras.length > 0) throw new Error(LEER_TRAS_ESCRIBIR);
+          return Promise.resolve(instantanea(d.clave));
+        },
         set: (d: { clave: string }, valor: unknown) => escrituras.push(() => datos.set(d.clave, structuredClone(valor))),
         delete: (d: { clave: string }) => escrituras.push(() => datos.delete(d.clave)),
       });
@@ -89,6 +92,47 @@ describe.each([
         return Promise.reject(new Error("falla"));
       }),
     ).rejects.toThrow("falla");
+    expect(await almacen.obtener("c", "1")).toBeUndefined();
+  });
+
+  it.each([
+    [
+      "guardar",
+      (tx: Transaccion) => {
+        tx.guardar("c", "2", { nombre: "B", prestado: true });
+      },
+    ],
+    [
+      "borrar",
+      (tx: Transaccion) => {
+        tx.borrar("c", "2");
+      },
+    ],
+  ])("leer después de %s en la transacción falla como en Firestore y no escribe nada", async (_escritura, escribir) => {
+    const almacen = crear();
+    await almacen.guardar("c", "1", { nombre: "A", prestado: false });
+    await almacen.guardar("c", "2", { nombre: "B", prestado: false });
+    await expect(
+      almacen.transaccion(async (tx) => {
+        escribir(tx);
+        return tx.obtener<Equipo>("c", "1");
+      }),
+    ).rejects.toThrow(LEER_TRAS_ESCRIBIR);
+    expect(await almacen.obtener<Equipo>("c", "2")).toEqual({ nombre: "B", prestado: false });
+  });
+
+  it("dentro de la transacción se puede leer varias veces antes de escribir", async () => {
+    const almacen = crear();
+    await almacen.guardar("c", "1", { nombre: "A", prestado: false });
+    await almacen.guardar("c", "2", { nombre: "B", prestado: false });
+    const nombres = await almacen.transaccion(async (tx) => {
+      const uno = await tx.obtener<Equipo>("c", "1");
+      const dos = await tx.obtener<Equipo>("c", "2");
+      tx.borrar("c", "1");
+      tx.guardar("c", "2", { nombre: "B", prestado: true });
+      return [uno?.nombre, dos?.nombre];
+    });
+    expect(nombres).toEqual(["A", "B"]);
     expect(await almacen.obtener("c", "1")).toBeUndefined();
   });
 });

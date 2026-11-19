@@ -40,9 +40,13 @@ export interface OpcionesContexto {
 
 const copia = <T>(valor: T): T => structuredClone(valor);
 
+/** El error de Firestore al leer en una transacción después de escribir; el almacén en memoria da el mismo. */
+export const LEER_TRAS_ESCRIBIR = "Firestore transactions require all reads to be executed before all writes.";
+
 /**
  * Almacén en memoria, para los tests y para arrancar sin base de datos. Las transacciones van de una en
- * una, así que son atómicas. Los datos se pierden al parar el proceso.
+ * una, así que son atómicas. Los datos se pierden al parar el proceso. Es tan estricto como Firestore: una
+ * transacción que lee después de escribir falla (harness#755), para que los tests lo vean antes que staging.
  */
 export function almacenEnMemoria(): Almacen {
   const colecciones = new Map<string, Map<string, object>>();
@@ -78,7 +82,8 @@ export function almacenEnMemoria(): Almacen {
       const ejecutar = async (): Promise<R> => {
         const escrituras: (() => void)[] = [];
         const resultado = await trabajo({
-          obtener,
+          obtener: <T extends object>(coleccion: string, id: string) =>
+            escrituras.length > 0 ? Promise.reject(new Error(LEER_TRAS_ESCRIBIR)) : obtener<T>(coleccion, id),
           guardar: (coleccion, id, datos) => escrituras.push(() => de(coleccion).set(id, copia(datos))),
           borrar: (coleccion, id) => escrituras.push(() => de(coleccion).delete(id)),
         });

@@ -197,3 +197,50 @@ run "rechaza_una_cuenta_que_no_es_de_servicio" {
 
   expect_failures = [var.cuenta_ejecucion]
 }
+
+run "pasa_las_variables_de_entorno_propias_de_la_aplicacion" {
+  command = plan
+
+  variables {
+    variables_entorno = { CORREOS_IT = "it@empresa.com,inventario@proyecto.iam.gserviceaccount.com" }
+  }
+
+  assert {
+    condition     = contains([for e in google_cloud_run_v2_service.aplicacion.template[0].containers[0].env : "${e.name}=${e.value}"], "CORREOS_IT=it@empresa.com,inventario@proyecto.iam.gserviceaccount.com")
+    error_message = "El servicio recibe las variables de entorno de variables_entorno."
+  }
+
+  assert {
+    condition     = contains([for e in google_cloud_run_v2_service.aplicacion.template[0].containers[0].env : e.name], "FIRESTORE_DATABASE") && contains([for e in google_cloud_run_v2_service.aplicacion.template[0].containers[0].env : e.name], "GOOGLE_CLIENT_ID")
+    error_message = "Las variables propias se suman a las de la plantilla, no las sustituyen."
+  }
+}
+
+run "sin_variables_propias_solo_las_de_la_plantilla" {
+  command = plan
+
+  assert {
+    condition     = length(google_cloud_run_v2_service.aplicacion.template[0].containers[0].env) == 2
+    error_message = "Sin variables_entorno, el servicio solo recibe FIRESTORE_DATABASE y GOOGLE_CLIENT_ID."
+  }
+}
+
+run "rechaza_un_nombre_de_variable_no_valido" {
+  command = plan
+
+  variables {
+    variables_entorno = { "correos-it" = "x" }
+  }
+
+  expect_failures = [var.variables_entorno]
+}
+
+run "no_deja_cambiar_las_variables_de_la_plantilla" {
+  command = plan
+
+  variables {
+    variables_entorno = { GOOGLE_CLIENT_ID = "otro" }
+  }
+
+  expect_failures = [var.variables_entorno]
+}

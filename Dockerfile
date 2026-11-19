@@ -16,6 +16,9 @@ FROM node:22-slim
 # vulnerabilidades traen a la imagen: se quitan.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
     /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+# Los parches de Debian que la imagen base aún no trae (harness#646, CVE-2026-109518 de apt): el job
+# imagen del CI falla con un HIGH corregido, y sin él no hay despliegue.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production PORT=8080
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
