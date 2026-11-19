@@ -2,10 +2,16 @@
 import type { FastifyPluginAsync } from "fastify";
 import "../../lib/auth.js";
 import type { OpcionesContexto } from "../../lib/datos.js";
-import { equiposConPrestamo } from "./prestamos.js";
+import { equiposConPrestamo, prestarEquipo } from "./prestamos.js";
 
 /** Rutas del contrato spec/contextos/prestamos/api.openapi.json. */
 export const rutas: FastifyPluginAsync<OpcionesContexto> = (app, { almacen }) => {
   app.get("/api/equipos", async () => equiposConPrestamo(almacen));
+  app.post<{ Params: { id: string } }>("/api/equipos/:id/prestamo", async (request, reply) => {
+    const cuerpo = request.body as { persona?: unknown; devolucion?: unknown } | null | undefined;
+    const resultado = await prestarEquipo(almacen, request.params.id, cuerpo?.persona, cuerpo?.devolucion);
+    if (!resultado.ok) return reply.code(resultado.status).send({ error: resultado.error });
+    return reply.code(201).send(resultado.equipo);
+  });
   return Promise.resolve();
 };
