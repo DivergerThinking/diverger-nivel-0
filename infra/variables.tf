@@ -63,6 +63,22 @@ variable "google_client_id" {
   default     = ""
 }
 
+variable "variables_entorno" {
+  description = "Variables de entorno propias de la aplicación, además de las que pone la plantilla. Van en infra/staging.tfvars, que es del repositorio y no de la plantilla. No son secretos: se ven en la configuración de Cloud Run."
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition     = alltrue([for nombre in keys(var.variables_entorno) : can(regex("^[A-Z][A-Z0-9_]*$", nombre))])
+    error_message = "Los nombres de las variables de entorno van en mayúsculas, con dígitos y guiones bajos, y empiezan por una letra."
+  }
+
+  validation {
+    condition     = length(setintersection(keys(var.variables_entorno), ["FIRESTORE_DATABASE", "GOOGLE_CLIENT_ID", "PORT"])) == 0
+    error_message = "FIRESTORE_DATABASE, GOOGLE_CLIENT_ID y PORT los pone la plantilla: no se pueden cambiar con variables_entorno."
+  }
+}
+
 variable "instancias_maximas" {
   description = "Instancias máximas de Cloud Run: limita el gasto."
   type        = number
