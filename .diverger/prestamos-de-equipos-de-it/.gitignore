@@ -1,0 +1,5 @@
+# Estado local del orquestador de Diverger: no se versiona.
+run.json
+run.json.lock
+# Datos personales del equipo (correo, GitHub, Trello): no se versionan.
+equipo.local.json
