@@ -1,0 +1,180 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Préstamos",
+    "version": "1.0.0",
+    "description": "Lista de los equipos con su préstamo, préstamo y devolución. Sigue la API fijada por el cliente para el inventario de IT."
+  },
+  "servers": [{ "url": "/" }],
+  "security": [{ "google": [] }],
+  "paths": {
+    "/api/equipos": {
+      "get": {
+        "operationId": "prestamos.listarEquipos",
+        "summary": "Ver los equipos",
+        "responses": {
+          "200": {
+            "description": "Lista de equipos, cada uno con id, nombre y prestado; si está prestado, también persona y devolucion",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/EquipoConPrestamo" }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/SinSesion" }
+        }
+      }
+    },
+    "/api/equipos/{id}/prestamo": {
+      "post": {
+        "operationId": "prestamos.prestarEquipo",
+        "summary": "Prestar un equipo",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Prestamo" },
+              "example": { "persona": "Ana Pérez", "devolucion": "2026-11-20" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "El equipo, prestado: id, nombre, prestado true, persona y devolucion",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/EquipoPrestado" } }
+            }
+          },
+          "400": {
+            "description": "Faltan la persona o la fecha de devolución, o la fecha de devolución no es válida",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "examples": {
+                  "faltanDatos": { "value": { "error": "Faltan la persona o la fecha de devolución" } },
+                  "fechaNoValida": { "value": { "error": "La fecha de devolución no es válida" } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/SinSesion" },
+          "404": { "$ref": "#/components/responses/NoExiste" },
+          "409": {
+            "description": "El equipo ya está prestado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "example": { "error": "El equipo ya está prestado" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/equipos/{id}/devolucion": {
+      "post": {
+        "operationId": "prestamos.devolverEquipo",
+        "summary": "Apuntar la devolución",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": {
+            "description": "El equipo, con prestado false",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/EquipoDevuelto" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/SinSesion" },
+          "404": { "$ref": "#/components/responses/NoExiste" },
+          "409": {
+            "description": "El equipo no está prestado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "example": { "error": "El equipo no está prestado" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "google": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Token de identidad de Google, con el correo verificado, emitido para el cliente OAuth de la aplicación, de una persona o de una cuenta de servicio"
+      }
+    },
+    "responses": {
+      "SinSesion": {
+        "description": "Inicia sesión con Google.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" },
+            "example": { "error": "Inicia sesión con Google." }
+          }
+        }
+      },
+      "NoExiste": {
+        "description": "No existe el equipo",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" },
+            "example": { "error": "No existe el equipo" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Prestamo": {
+        "type": "object",
+        "properties": {
+          "persona": { "type": "string" },
+          "devolucion": { "type": "string", "description": "Fecha de devolución como texto AAAA-MM-DD" }
+        }
+      },
+      "EquipoConPrestamo": {
+        "type": "object",
+        "required": ["id", "nombre", "prestado"],
+        "properties": {
+          "id": { "type": "string" },
+          "nombre": { "type": "string" },
+          "prestado": { "type": "boolean" },
+          "persona": { "type": "string", "description": "Solo si el equipo está prestado" },
+          "devolucion": { "type": "string", "description": "Solo si el equipo está prestado: fecha de devolución como texto AAAA-MM-DD" }
+        }
+      },
+      "EquipoPrestado": {
+        "type": "object",
+        "required": ["id", "nombre", "prestado", "persona", "devolucion"],
+        "properties": {
+          "id": { "type": "string" },
+          "nombre": { "type": "string" },
+          "prestado": { "type": "boolean", "const": true },
+          "persona": { "type": "string" },
+          "devolucion": { "type": "string", "description": "Fecha de devolución como texto AAAA-MM-DD, igual que se envió" }
+        }
+      },
+      "EquipoDevuelto": {
+        "type": "object",
+        "required": ["id", "nombre", "prestado"],
+        "properties": {
+          "id": { "type": "string" },
+          "nombre": { "type": "string" },
+          "prestado": { "type": "boolean", "const": false }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": { "error": { "type": "string" } }
+      }
+    }
+  }
+}
