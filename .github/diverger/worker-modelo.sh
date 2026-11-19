@@ -10,7 +10,7 @@
 # Si el modelo termina con «BLOQUEADA:», el intento falla con ese motivo, salvo que lo que sigue niegue el bloqueo,
 # como «no aplica» (harness#846); con «YA-CUBIERTA:», deja el motivo en
 # $RUNNER_TEMP/cubierta (harness#538). Tras unas comprobaciones en rojo, la línea «FALLO:» con la causa que corrigió,
-# solo si va justo antes de la última, se añade a $RUNNER_TEMP/fallos, que «Comprobar el resultado» guarda en la tarea
+# solo si es la última línea o va justo antes de ella, se añade a $RUNNER_TEMP/fallos, que «Comprobar el resultado» guarda en la tarea
 # (HU-NUC-20, harness#675 y harness#730).
 #
 # Permisos del modelo:
@@ -177,8 +177,10 @@ fi
 # rojo, como finish_worker en el modo interactivo: ni el primer intento ni el que sigue a un bloqueo del Auditor o del
 # revisor de código se pueden inventar un fallo. Lo que dice el modelo es un dato: «Comprobar el resultado» lo arregla antes de guardarlo.
 if [ -n "$tras_rojo" ]; then
-  # Solo la línea justo antes de la última no vacía, que es donde se le pide: una «FALLO:» en otro sitio puede venir
-  # citada de la salida de las comprobaciones, que escribe el código del proyecto (harness#730).
-  jq -r .result "$RUNNER_TEMP/salida-$intento.json" | awk '{ sub(/\r$/, "") } NF { antes = ultima; ultima = $0 } END { print antes }' \
+  # Solo la última línea no vacía, si empieza por «FALLO:», o si no, la de justo antes, que es donde se le pide: una
+  # «FALLO:» en otro sitio puede venir citada de la salida de las comprobaciones, que escribe el código del proyecto
+  # (harness#730). El modelo termina a menudo con su «FALLO:», sin nada detrás, y el fallo se perdía (harness#889).
+  jq -r .result "$RUNNER_TEMP/salida-$intento.json" \
+    | awk '{ sub(/\r$/, "") } NF { antes = ultima; ultima = $0 } END { print (ultima ~ /^(FALLO|FAILURE):/ ? ultima : antes) }' \
     | grep -E '^(FALLO|FAILURE):' >> "$RUNNER_TEMP/fallos" || true
 fi
