@@ -4,7 +4,7 @@ import Fastify, { type FastifyInstance, type FastifyPluginAsync } from "fastify"
 import fastifyStatic from "@fastify/static";
 import { tokenDeCabecera, type VerificarToken } from "../lib/auth.js";
 import { almacenEnMemoria, type Almacen, type OpcionesContexto } from "../lib/datos.js";
-import { contextos as contextosDeLaAplicacion } from "./contextos.js";
+import { contextos as contextosDeLaAplicacion } from "./contextos.gen.js";
 
 export interface Opciones {
   /** ID de cliente OAuth de Google; lo usa el frontend para pedir el token. Vacío, nadie inicia sesión. */
@@ -12,7 +12,7 @@ export interface Opciones {
   verificarToken: VerificarToken;
   /** Almacén de datos que reciben los contextos (lib/datos.ts); sin él, uno en memoria. */
   almacen?: Almacen;
-  /** Contextos que se registran; por defecto, los de app/contextos.ts. Los tests pueden pasar otros. */
+  /** Contextos que se registran; por defecto, los de src/ (app/contextos.gen.ts). Los tests pueden pasar otros. */
   contextos?: FastifyPluginAsync<OpcionesContexto>[];
   /** Carpeta del frontend construido; sin ella solo se sirve la API. */
   webRoot?: string;
