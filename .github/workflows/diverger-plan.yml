@@ -1,0 +1,147 @@
+name: diverger-plan
+run-name: diverger-plan ${{ github.event.pull_request.head.ref || github.ref_name }}
+
+# La PR del plan de una iniciativa (harness#711). El bucle desatendido y sus workers leen el plan (las tareas, spec/ y
+# tests/aceptacion/) de la rama base, así que tiene que integrarse antes de lanzar. La rama plan/<iniciativa> la sube
+# launch_unattended del núcleo desde la sesión de la persona, con su commit y sus trailers. Aquí pasan dos cosas:
+#
+# - Al llegar el push, la identidad del harness abre la PR y activa el auto-merge. Si la abriera la persona, no podría
+#   aprobarla: trae tests/aceptacion/, que CODEOWNERS reserva a sus propietarios, y GitHub no deja aprobar una PR
+#   propia. Acababa integrándola un administrador saltándose la regla, justo en la PR que crea la suite.
+# - Al integrarse la PR, se lanza el bucle de la iniciativa, sin que nadie tenga que volver a pedirlo. Solo si el commit
+#   del plan lleva el trailer «Diverger-Lanzar: <iniciativa>», que pone launch_unattended: es la persona quien pidió
+#   lanzar, con el permiso que Claude Code le pide para esa herramienta. Una rama plan/ subida a mano no lanza nada.
+#
+# No ejecuta nada de la rama: no hay checkout. La rama y el login llegan de fuera, se comprueban antes de usarlos y
+# nunca se pegan en un script. El token de la App solo escribe contenido y PR de este repositorio, como el del worker;
+# el bucle se lanza con el GITHUB_TOKEN del job, que es lo único que necesita Actions de escritura.
+
+on:
+  push:
+    branches: ["plan/**"]
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  abrir:
+    if: github.event_name == 'push' && github.event.deleted == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      RAMA: ${{ github.ref_name }}
+      BASE: ${{ github.event.repository.default_branch }}
+      SUBIDA_POR: ${{ github.actor }}
+    steps:
+      - name: Validar la rama y quién la sube
+        run: |
+          fallar() { echo "::error::$1"; exit 1; }
+          [[ "$RAMA" =~ ^plan/[a-z0-9]+(-[a-z0-9]+)*$ ]] || fallar "La rama «$RAMA» no es la del plan de una iniciativa (plan/<iniciativa>)"
+          [[ "$BASE" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || fallar "La rama base no es válida"
+          [[ "$SUBIDA_POR" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] || fallar "La rama la ha subido $SUBIDA_POR, que no es una persona"
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: token
+        with:
+          app-id: ${{ vars.DIVERGER_HARNESS_APP_ID }}
+          private-key: ${{ secrets.DIVERGER_HARNESS_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Abrir la PR del plan
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          fallar() { echo "::error::$1"; exit 1; }
+          repo="$GITHUB_REPOSITORY"
+          abierta=$(gh pr list -R "$repo" --head "$RAMA" --base "$BASE" --state open --json url --jq '.[0].url // ""') \
+            || fallar "No se han podido leer las PR de $RAMA"
+          if [ -n "$abierta" ]; then
+            echo "La PR del plan ya está abierta: $abierta" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          iniciativa="${RAMA#plan/}"
+          {
+            echo "Plan de la iniciativa \`$iniciativa\`: las tareas, \`spec/\` y los tests de aceptación que el bucle desatendido y sus workers leen de \`$BASE\`. Hasta que esta PR se integra, el bucle no puede arrancar."
+            echo
+            echo "La rama la subió la sesión de Diverger de quien lanzó la ejecución, y la PR la abre la identidad del harness para que una persona propietaria de \`tests/aceptacion/\` pueda aprobarla: nadie puede aprobar una PR propia (harness#711)."
+            echo
+            echo "## Qué se pide"
+            echo
+            echo "Revisar los tests de aceptación y aprobar la PR. Se integra sola cuando pasan las comprobaciones y, si el plan pidió lanzar la construcción, el bucle arranca al integrarse."
+            echo
+            echo "Lanzado por @$SUBIDA_POR."
+          } > "$RUNNER_TEMP/pr.md"
+          url=$(gh pr create -R "$repo" --base "$BASE" --head "$RAMA" \
+            --title "chore: plan de la iniciativa «$iniciativa»" --body-file "$RUNNER_TEMP/pr.md") \
+            || fallar "No se ha podido abrir la PR desde $RAMA"
+          echo "PR del plan abierta: $url" | tee -a "$GITHUB_STEP_SUMMARY"
+          # Auto-merge: GitHub la integra cuando se cumplen las reglas de la rama base, la aprobación de CODEOWNERS
+          # incluida. Si el repositorio no lo permite, queda abierta y alguien la integra.
+          if gh pr merge "$url" -R "$repo" --auto --merge --delete-branch; then
+            echo "Auto-merge activado: se integra cuando pasen las comprobaciones y la aprueben." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::No se ha podido activar el auto-merge (¿«Allow auto-merge» desactivado?): alguien tiene que integrar $url"
+          fi
+
+  lanzar:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'plan/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write # Para lanzar diverger-bucle.yml: workflow_dispatch sí crea ejecuciones con el GITHUB_TOKEN.
+      contents: read # Para ver que la iniciativa tiene tareas en la rama base.
+      pull-requests: read # Para leer los commits de la PR.
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RAMA: ${{ github.event.pull_request.head.ref }}
+      BASE: ${{ github.event.pull_request.base.ref }}
+      NUMERO: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Lanzar el bucle si el plan lo pidió
+        run: |
+          fallar() { echo "::error::$1"; exit 1; }
+          decir() { echo "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
+          repo="$GITHUB_REPOSITORY"
+          [[ "$RAMA" =~ ^plan/[a-z0-9]+(-[a-z0-9]+)*$ ]] || { decir "La rama $RAMA no es la del plan de una iniciativa: no se lanza nada."; exit 0; }
+          [[ "$BASE" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || fallar "La rama base no es válida"
+          [[ "$NUMERO" =~ ^[0-9]+$ ]] || fallar "El número de la PR no es válido"
+          # Los mensajes de los commits de la PR, de la API. La iniciativa sale del trailer, que se comprueba antes de
+          # usarlo: la rama puede llevar un sufijo (plan/<iniciativa>-2) cuando una ejecución anterior dejó la suya.
+          gh api --paginate "repos/$repo/pulls/$NUMERO/commits" --jq '.[].commit.message' \
+            > "$RUNNER_TEMP/commits" || fallar "No se han podido leer los commits de la PR #$NUMERO"
+          mapfile -t pedidas < <(grep -E '^Diverger-Lanzar:[ 	]*[a-z0-9][a-z0-9-]{0,63}[ 	]*$' "$RUNNER_TEMP/commits" \
+            | sed -E 's/^Diverger-Lanzar:[ 	]*//; s/[ 	]*$//' | sort -u)
+          if [ "${#pedidas[@]}" -eq 0 ]; then
+            decir "El plan de la PR #$NUMERO no pidió lanzar la construcción (sin el trailer Diverger-Lanzar): no se lanza nada."
+            exit 0
+          fi
+          [ "${#pedidas[@]}" -eq 1 ] || fallar "Los commits de la PR #$NUMERO piden lanzar más de una iniciativa: ${pedidas[*]}"
+          iniciativa="${pedidas[0]}"
+          [[ "$RAMA" == "plan/$iniciativa" || "$RAMA" =~ ^plan/${iniciativa}-[0-9]+$ ]] \
+            || fallar "La rama $RAMA no es la del plan de la iniciativa $iniciativa que pide lanzar su commit"
+          gh api "repos/$repo/contents/.diverger/$iniciativa/tasks?ref=$BASE" --jq 'length' > /dev/null 2>&1 \
+            || { decir "La iniciativa $iniciativa no tiene tareas en $BASE: no se lanza nada."; exit 0; }
+          # Un solo bucle por iniciativa: si ya hay uno en marcha o en cola, no se lanza otro.
+          en_marcha=$(gh run list -R "$repo" -w diverger-bucle.yml --limit 50 --json status,displayTitle \
+            --jq "[.[] | select(.status != \"completed\" and .displayTitle == \"diverger-bucle $iniciativa\")] | length") \
+            || fallar "No se ha podido mirar si el bucle de $iniciativa ya está en marcha"
+          if [ "$en_marcha" != "0" ]; then
+            decir "El bucle de $iniciativa ya está en marcha: no se lanza otro."
+            exit 0
+          fi
+          # Quién lo lanzó, para el aviso de una tarea bloqueada: quien hizo el commit del plan, según GitHub. Los
+          # commits de los workers dicen quién lanzó con scripts/lanzador.mjs, que lo lee de las ejecuciones de Actions.
+          opciones=(-f "initiative=$iniciativa")
+          persona=$(grep -E '^Diverger-Iniciado-por:[ 	]*[A-Za-z0-9][A-Za-z0-9-]{0,38}[ 	]*$' "$RUNNER_TEMP/commits" \
+            | sed -E 's/^Diverger-Iniciado-por:[ 	]*//; s/[ 	]*$//' | sort -u)
+          [[ "$persona" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] && opciones+=(-f "lanzado-por=$persona")
+          gh workflow run diverger-bucle.yml -R "$repo" --ref "$BASE" "${opciones[@]}" \
+            || fallar "No se ha podido lanzar el bucle de $iniciativa"
+          decir "Bucle de $iniciativa lanzado en $BASE al integrarse la PR #$NUMERO del plan."
