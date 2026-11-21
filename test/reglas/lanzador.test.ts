@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { arrancar, lanzadoPorElBucle, PERSONAS, REPO, type Datos } from "./github-falso.js";
+import { arrancar, lanzadoPorElBucle, PERSONAS, REPO, type Datos, type Ejecucion } from "./github-falso.js";
 
 const SCRIPT = join(import.meta.dirname, "..", "..", "scripts", "lanzador.mjs");
 let servidor: Server | undefined;
@@ -46,6 +46,44 @@ describe("quién lanzó la ejecución", () => {
     const r = await lanzador({ ejecuciones, usuarios: PERSONAS }, "900", "prestamos");
     expect(r.errores).toBe("");
     expect(JSON.parse(r.salida)).toMatchObject({ login: "joselcs", id: 1234567 });
+  });
+
+  describe("si el bucle se lanzó al integrarse la PR del plan (harness#711)", () => {
+    // diverger-plan.yml lanza el bucle con el GITHUB_TOKEN de su job: quien lo lanzó es quien subió la rama del plan.
+    const conPlan = (planes: Ejecucion[]): Ejecucion[] => [
+      ...lanzadoPorElBucle("github-actions[bot]").filter((e) => e.id !== 700), ...planes];
+    const plan = (id: number, rama: string, persona: string, cuando: string, event = "push"): Ejecucion => ({
+      id, path: ".github/workflows/diverger-plan.yml", actor: { login: persona }, display_title: `diverger-plan ${rama}`,
+      head_branch: rama, event, status: "completed", created_at: cuando, updated_at: cuando });
+
+    it("es quien subió la rama del plan de esa iniciativa, la última antes del bucle", async () => {
+      const ejecuciones = conPlan([
+        plan(750, "plan/prestamos", "ana-lopez", "2026-11-02T09:00:00Z"),
+        plan(760, "plan/prestamos-2", "joselcs", "2026-11-02T09:50:00Z"),
+        // Ni el plan de otra iniciativa, ni uno subido después de empezar el bucle, ni el cierre de la PR.
+        plan(770, "plan/prestamos-de-verano", "ana-lopez", "2026-11-02T09:55:00Z"),
+        plan(780, "plan/prestamos", "ana-lopez", "2026-11-02T10:30:00Z"),
+        plan(790, "plan/prestamos", "ana-lopez", "2026-11-02T09:58:00Z", "pull_request"),
+      ]);
+      const r = await lanzador({ ejecuciones, usuarios: PERSONAS }, "900", "prestamos");
+      expect(r.errores).toBe("");
+      expect(JSON.parse(r.salida)).toEqual({ login: "joselcs", id: 1234567, nombre: "José Luis Calvo",
+        ejecucion: `https://github.com/${REPO}/actions/runs/800` });
+    });
+
+    it("falla si nadie subió antes el plan de esa iniciativa", async () => {
+      const r = await lanzador({ ejecuciones: conPlan([plan(770, "plan/otra", "joselcs", "2026-11-02T09:55:00Z")]),
+        usuarios: PERSONAS }, "900", "prestamos");
+      expect(r.codigo).toBe(1);
+      expect(r.errores).toContain("no se encuentra quién subió la rama plan/prestamos");
+    });
+
+    it("falla si la rama del plan la subió una GitHub App", async () => {
+      const r = await lanzador({ ejecuciones: conPlan([plan(760, "plan/prestamos", "diverger-harness[bot]",
+        "2026-11-02T09:50:00Z")]), usuarios: PERSONAS }, "900", "prestamos");
+      expect(r.codigo).toBe(1);
+      expect(r.errores).toContain("la lanzó diverger-harness[bot], que no es una persona");
+    });
   });
 
   it("si una persona lanzó el worker a mano, es esa persona", async () => {
