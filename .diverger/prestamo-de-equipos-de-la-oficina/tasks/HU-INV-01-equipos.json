@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "HU-INV-01-equipos",
   "title": "Equipos: dar de alta un equipo (HU-INV-01)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-INV-01",
   "context": "equipos",
   "modules": ["src/equipos", "web/equipos"],
