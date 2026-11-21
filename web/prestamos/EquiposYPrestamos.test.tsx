@@ -37,7 +37,7 @@ describe("apuntar un préstamo", () => {
       body: JSON.stringify({ persona: "Ana Pérez", devolucion: "2026-12-04" }),
     });
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Apuntar préstamo de Portátil 07" })).toBeNull();
   });
 
   it.each([
@@ -54,6 +54,36 @@ describe("apuntar un préstamo", () => {
     rellenar("", "2026-12-04");
     expect((await screen.findByRole("alert")).textContent).toBe(mensaje);
     expect(screen.getByText("Portátil 07 · No prestado")).toBeTruthy();
+  });
+});
+
+describe("apuntar la devolución", () => {
+  const PRESTADO = { id: "e1", nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-12-04" };
+
+  it("llama a la operación con el token y la lista muestra el equipo sin prestar", async () => {
+    const fetch = vi.fn((ruta: string) =>
+      Promise.resolve(ruta === "/api/equipos" ? respuesta([PRESTADO]) : respuesta({ id: "e1", nombre: "Portátil 07", prestado: false })),
+    );
+    vi.stubGlobal("fetch", fetch);
+    render(<EquiposYPrestamos sesion={SESION} />);
+    await screen.findByText("Portátil 07 · Prestado a Ana Pérez hasta el 2026-12-04");
+    fireEvent.click(screen.getByRole("button", { name: "Apuntar devolución de Portátil 07" }));
+    expect(await screen.findByText("Portátil 07 · No prestado")).toBeTruthy();
+    expect(fetch).toHaveBeenCalledWith("/api/equipos/e1/devolucion", { method: "POST", headers: { authorization: "Bearer token-de-ana" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it.each([
+    [409, "El equipo no está prestado"],
+    [404, "No existe el equipo"],
+  ])("con un %i enseña el mensaje de la API", async (status, mensaje) => {
+    vi.stubGlobal("fetch", (ruta: string) =>
+      Promise.resolve(ruta === "/api/equipos" ? respuesta([PRESTADO]) : respuesta({ error: mensaje }, status)),
+    );
+    render(<EquiposYPrestamos sesion={SESION} />);
+    await screen.findByText("Portátil 07 · Prestado a Ana Pérez hasta el 2026-12-04");
+    fireEvent.click(screen.getByRole("button", { name: "Apuntar devolución de Portátil 07" }));
+    expect((await screen.findByRole("alert")).textContent).toBe(mensaje);
   });
 });
 

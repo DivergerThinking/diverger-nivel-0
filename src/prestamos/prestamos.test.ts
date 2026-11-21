@@ -103,6 +103,61 @@ describe("prestar un equipo", () => {
   });
 });
 
+describe("apuntar la devolución", () => {
+  async function conEquipos() {
+    const { app } = await servidor();
+    const alta = async (nombre: string) =>
+      (await app.inject({ method: "POST", url: "/api/equipos", payload: { nombre } })).json<{ id: string }>().id;
+    const portatil = await alta("Portátil 07");
+    const proyector = await alta("Proyector sala 2");
+    await app.inject({ method: "POST", url: `/api/equipos/${portatil}/prestamo`, payload: { persona: "Ana Pérez", devolucion: "2026-12-04" } });
+    const devolver = (id: string) => app.inject({ method: "POST", url: `/api/equipos/${id}/devolucion` });
+    const lista = async () => (await app.inject({ method: "GET", url: "/api/equipos" })).json<object[]>();
+    return { portatil, proyector, devolver, lista };
+  }
+
+  it("responde 200 con el equipo sin prestar y la lista lo muestra sin persona ni fecha", async () => {
+    const { portatil, devolver, lista } = await conEquipos();
+    const respuesta = await devolver(portatil);
+    expect(respuesta.statusCode).toBe(200);
+    expect(respuesta.json()).toEqual({ id: portatil, nombre: "Portátil 07", prestado: false });
+    expect(await lista()).toContainEqual({ id: portatil, nombre: "Portátil 07", prestado: false });
+  });
+
+  it("el equipo devuelto se puede volver a prestar", async () => {
+    const { app } = await servidor();
+    const id = (await app.inject({ method: "POST", url: "/api/equipos", payload: { nombre: "Portátil 07" } })).json<{ id: string }>().id;
+    const prestar = () =>
+      app.inject({ method: "POST", url: `/api/equipos/${id}/prestamo`, payload: { persona: "Ana Pérez", devolucion: "2026-12-04" } });
+    await prestar();
+    await app.inject({ method: "POST", url: `/api/equipos/${id}/devolucion` });
+    expect((await prestar()).statusCode).toBe(201);
+  });
+
+  it("responde 409 si el equipo no está prestado y sigue sin prestar", async () => {
+    const { proyector, devolver, lista } = await conEquipos();
+    const respuesta = await devolver(proyector);
+    expect(respuesta.statusCode).toBe(409);
+    expect(respuesta.json()).toEqual({ error: "El equipo no está prestado" });
+    expect(await lista()).toContainEqual({ id: proyector, nombre: "Proyector sala 2", prestado: false });
+  });
+
+  it("responde 409 si se devuelve dos veces", async () => {
+    const { portatil, devolver } = await conEquipos();
+    await devolver(portatil);
+    const respuesta = await devolver(portatil);
+    expect(respuesta.statusCode).toBe(409);
+    expect(respuesta.json()).toEqual({ error: "El equipo no está prestado" });
+  });
+
+  it("responde 404 si el equipo no existe", async () => {
+    const { devolver } = await conEquipos();
+    const respuesta = await devolver("no-existe");
+    expect(respuesta.statusCode).toBe(404);
+    expect(respuesta.json()).toEqual({ error: "No existe el equipo" });
+  });
+});
+
 describe("lista de equipos", () => {
   it("responde 200 con una lista vacía si no hay equipos", async () => {
     const { app } = await servidor();

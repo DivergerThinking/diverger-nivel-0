@@ -67,6 +67,16 @@ export function EquiposYPrestamos({ sesion }: { sesion: Sesion }) {
     }
   };
 
+  const devolver = async (equipo: Equipo) => {
+    try {
+      const libre = await api<Equipo>(sesion, `/api/equipos/${encodeURIComponent(equipo.id)}/devolucion`, { metodo: "POST" });
+      setEquipos((actuales) => actuales.map((actual) => (actual.id === libre.id ? libre : actual)));
+      setError(null);
+    } catch (motivo: unknown) {
+      setError(motivo instanceof Error ? motivo.message : String(motivo));
+    }
+  };
+
   return (
     <section aria-labelledby="equipos-y-prestamos">
       <h2 id="equipos-y-prestamos">Equipos y préstamos</h2>
@@ -79,7 +89,13 @@ export function EquiposYPrestamos({ sesion }: { sesion: Sesion }) {
                 ? `${equipo.nombre} · Prestado a ${equipo.persona ?? ""} hasta el ${equipo.devolucion ?? ""}`
                 : `${equipo.nombre} · No prestado`}
             </span>
-            {!equipo.prestado && <FormularioDePrestamo equipo={equipo} alPrestar={(cuerpo) => void prestar(equipo, cuerpo)} />}
+            {equipo.prestado ? (
+              <button type="button" onClick={() => void devolver(equipo)}>
+                Apuntar devolución de {equipo.nombre}
+              </button>
+            ) : (
+              <FormularioDePrestamo equipo={equipo} alPrestar={(cuerpo) => void prestar(equipo, cuerpo)} />
+            )}
           </li>
         ))}
       </ul>
