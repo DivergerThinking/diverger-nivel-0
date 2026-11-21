@@ -18,6 +18,8 @@ export const FECHA_NO_VALIDA = "La fecha de devolución no es válida";
 export const NO_EXISTE_EL_EQUIPO = "No existe el equipo";
 export const YA_ESTA_PRESTADO = "El equipo ya está prestado";
 
+export const NO_ESTA_PRESTADO = "El equipo no está prestado";
+
 export type ResultadoPrestamo =
   | { ok: true; equipo: EquipoConPrestamo }
   | { ok: false; status: 400 | 404 | 409; error: string };
@@ -46,6 +48,19 @@ export async function prestarEquipo(almacen: Almacen, id: string, persona: unkno
   });
   if (yaPrestado) return { ok: false, status: 409, error: YA_ESTA_PRESTADO };
   return { ok: true, equipo: { id: equipo.id, nombre: equipo.nombre, prestado: true, persona, devolucion } };
+}
+
+/** Apunta la devolución de un equipo: borra su préstamo activo y el equipo vuelve a estar libre. */
+export async function devolverEquipo(almacen: Almacen, id: string): Promise<ResultadoPrestamo> {
+  const equipo = await obtenerEquipo(almacen, id);
+  if (equipo === undefined) return { ok: false, status: 404, error: NO_EXISTE_EL_EQUIPO };
+  const estabaPrestado = await almacen.transaccion(async (tx) => {
+    if ((await tx.obtener<PrestamoActivo>(PRESTAMOS_ACTIVOS, id)) === undefined) return false;
+    tx.borrar(PRESTAMOS_ACTIVOS, id);
+    return true;
+  });
+  if (!estabaPrestado) return { ok: false, status: 409, error: NO_ESTA_PRESTADO };
+  return { ok: true, equipo: { id: equipo.id, nombre: equipo.nombre, prestado: false } };
 }
 
 /** Todos los equipos, cada uno con su préstamo solo si está prestado. */
