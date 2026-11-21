@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "initiative": "prestamo-de-equipos-de-la-oficina",
+  "status": "approved",
+  "checks": {
+    "constitution": {
+      "result": "pass",
+      "at": "2026-11-21",
+      "notes": []
+    }
+  },
+  "contexts": [
+    {
+      "id": "equipos",
+      "name": "Equipos",
+      "path": "spec/contextos/equipos/",
+      "module": "src/equipos",
+      "stories": [
+        "HU-INV-01",
+        "HU-ACC-01",
+        "HU-ACC-02"
+      ],
+      "dependsOn": [],
+      "contracts": [
+        {
+          "kind": "openapi",
+          "path": "spec/contextos/equipos/api.openapi.json"
+        }
+      ],
+      "screens": {
+        "path": "spec/contextos/equipos/pantallas.md",
+        "module": "web/equipos"
+      },
+      "publishes": [],
+      "subscribes": []
+    },
+    {
+      "id": "prestamos",
+      "name": "Préstamos",
+      "path": "spec/contextos/prestamos/",
+      "module": "src/prestamos",
+      "stories": [
+        "HU-INV-02",
+        "HU-PRE-01",
+        "HU-PRE-02",
+        "HU-PRE-03",
+        "HU-ACC-01",
+        "HU-ACC-02"
+      ],
+      "dependsOn": [
+        "equipos"
+      ],
+      "contracts": [
+        {
+          "kind": "openapi",
+          "path": "spec/contextos/prestamos/api.openapi.json"
+        }
+      ],
+      "screens": {
+        "path": "spec/contextos/prestamos/pantallas.md",
+        "module": "web/prestamos"
+      },
+      "publishes": [],
+      "subscribes": []
+    }
+  ],
+  "approved": {
+    "at": "2026-11-21T13:05:11Z",
+    "contracts": {
+      "spec/contextos/equipos/api.openapi.json": "1.0.0",
+      "spec/contextos/prestamos/api.openapi.json": "1.0.0"
+    },
+    "lastAdr": 4
+  }
+}
