@@ -1,0 +1,33 @@
+{
+  "extraKnownMarketplaces": {
+    "diverger": {
+      "source": {
+        "source": "github",
+        "repo": "DivergerThinking/Diverger-ExP-Harness"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "diverger@diverger": true,
+    "diverger-product@diverger": true,
+    "diverger-architect@diverger": true,
+    "diverger-project@diverger": true,
+    "diverger-dev@diverger": true,
+    "diverger-quality@diverger": true,
+    "diverger-ops@diverger": true
+  },
+  "permissions": {
+    "allow": [
+      "Skill(diverger-product:intake)",
+      "Skill(diverger-product:discover)",
+      "Skill(diverger-product:write-backlog)",
+      "Skill(diverger-product:review)",
+      "Skill(diverger-product:plan-sprint)",
+      "Skill(diverger-product:export)",
+      "Skill(diverger-architect:design)",
+      "Skill(diverger-architect:check)",
+      "Skill(diverger-project:plan)"
+    ],
+    "blockWritesOutsideWorkingDirectories": true
+  }
+}

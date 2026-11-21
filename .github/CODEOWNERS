@@ -20,3 +20,7 @@ CLAUDE.md @joselcs
 # La suite de aceptación es el examen de las historias (EN-CAL-01, ADR 0031 del harness): la cambia una
 # persona desde el backlog, nunca la PR de una tarea. Dos propietarios, para que uno apruebe las PR del otro.
 /tests/aceptacion/ @joselcs @686f6c61
+
+# Diverger (EN-OPS-11): las instrucciones y la configuración que siguen los agentes no cambian sin la
+# revisión de una persona. Solo obliga si una regla de la rama exige la revisión de CODEOWNERS.
+/.diverger/permisos-yolo.json @joselcs
