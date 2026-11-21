@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "HU-INV-02-prestamos",
   "title": "Préstamos: ver los equipos y sus préstamos (HU-INV-02)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-INV-02",
   "context": "prestamos",
   "modules": ["src/prestamos", "web/prestamos"],
