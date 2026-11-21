@@ -33,6 +33,36 @@ describe("pantalla Alta de equipos", () => {
     });
   });
 
+  it("enseña los dos equipos cuando se dan de alta con nombres distintos", async () => {
+    const equipos = [
+      { id: "e1", nombre: "Portátil 07", prestado: false },
+      { id: "e2", nombre: "Portátil 08", prestado: false },
+    ];
+    vi.stubGlobal("fetch", () => Promise.resolve(respuesta(equipos.shift(), 201)));
+    render(<AltaDeEquipos sesion={SESION} />);
+    darDeAlta("Portátil 07");
+    await screen.findByText("Portátil 07 · No prestado");
+    darDeAlta("Portátil 08");
+    expect(await screen.findByText("Portátil 08 · No prestado")).toBeTruthy();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("con un nombre repetido enseña el aviso de la API y la lista sigue con un solo equipo", async () => {
+    const respuestas = [
+      respuesta({ id: "e1", nombre: "Portátil 07", prestado: false }, 201),
+      respuesta({ error: "Ya hay un equipo con ese nombre" }, 409),
+    ];
+    const fetch = vi.fn(() => Promise.resolve(respuestas.shift() as Response));
+    vi.stubGlobal("fetch", fetch);
+    render(<AltaDeEquipos sesion={SESION} />);
+    darDeAlta("Portátil 07");
+    await screen.findByText("Portátil 07 · No prestado");
+    darDeAlta(" portátil 07 ");
+    expect((await screen.findByRole("alert")).textContent).toBe("Ya hay un equipo con ese nombre");
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByText("Portátil 07 · No prestado")).toBeTruthy();
+  });
+
   it.each([
     [400, "Falta el nombre del equipo"],
     [409, "Ya hay un equipo con ese nombre"],

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "HU-EQU-02-equipos",
   "title": "Equipos: evitar equipos con el nombre repetido (HU-EQU-02)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-EQU-02",
   "context": "equipos",
   "modules": ["src/equipos", "web/equipos"],
