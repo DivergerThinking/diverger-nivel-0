@@ -47,7 +47,7 @@ describe("workflow del bucle desatendido", () => {
   it("se lanza a mano con la iniciativa, los workers a la vez y el reinicio", () => {
     expect(Object.keys(WF.on)).toEqual(["workflow_dispatch"]);
     const entradas = WF.on.workflow_dispatch.inputs;
-    expect(Object.keys(entradas)).toEqual(["initiative", "max-workers", "restart"]);
+    expect(Object.keys(entradas)).toEqual(["initiative", "max-workers", "restart", "lanzado-por"]);
     expect(entradas.initiative).toMatchObject({ required: true, type: "string" });
     expect(WF["run-name"]).toBe("diverger-bucle ${{ inputs.initiative }}");
   });
@@ -132,7 +132,8 @@ describe("workflow del bucle desatendido", () => {
     expect(tokensDeLaApp.map((p) => p.id)).toEqual(["token-nucleo"]);
     expect(paso("Recuperar el estado anterior").env).toEqual({ GH_TOKEN: "${{ github.token }}" });
     expect(paso("Bucle").env).toEqual({ GH_TOKEN: "${{ github.token }}",
-      GCP_ARRANQUE: "${{ steps.gcp-arranque.outcome }}", LANZADO_POR: "${{ github.actor }}" });
+      GCP_ARRANQUE: "${{ steps.gcp-arranque.outcome }}", LANZADO_POR: "${{ github.actor }}",
+      LANZADO_POR_PLAN: "${{ inputs.lanzado-por }}" });
     for (const p of PASOS) {
       if (p.id === "token-nucleo" || p.with?.repository === "${{ github.repository_owner }}/Diverger-ExP-Harness") continue;
       expect(JSON.stringify(p), p.name ?? p.id ?? p.uses).not.toMatch(/steps\.token-[a-z-]+\.outputs\.token/);

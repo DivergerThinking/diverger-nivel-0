@@ -9,6 +9,8 @@ export interface Ejecucion {
   actor: { login: string };
   display_title: string;
   head_branch?: string;
+  /** El evento que la lanzó (push, workflow_dispatch...): solo lo miran las de diverger-plan.yml (harness#711). */
+  event?: string;
   status: string;
   created_at: string;
   run_started_at?: string;
@@ -69,6 +71,12 @@ function responder(datos: Datos, url: URL): unknown {
     const hasta = Date.parse((url.searchParams.get("created") ?? "").replace(/^<=/, ""));
     return { workflow_runs: datos.ejecuciones.filter((e) => e.path.endsWith("diverger-bucle.yml")
       && (Number.isNaN(hasta) || Date.parse(e.created_at) <= hasta)) };
+  }
+  if (url.pathname === `/repos/${REPO}/actions/workflows/diverger-plan.yml/runs`) {
+    const hasta = Date.parse((url.searchParams.get("created") ?? "").replace(/^<=/, ""));
+    const evento = url.searchParams.get("event");
+    return { workflow_runs: datos.ejecuciones.filter((e) => e.path.endsWith("diverger-plan.yml")
+      && (!evento || e.event === evento) && (Number.isNaN(hasta) || Date.parse(e.created_at) <= hasta)) };
   }
   const pr = new RegExp(`^/repos/${REPO}/pulls/([0-9]+)$`).exec(url.pathname);
   if (pr) return datos.prs?.[pr[1] ?? ""];

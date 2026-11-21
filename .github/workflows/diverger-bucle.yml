@@ -36,6 +36,11 @@ on:
         required: false
         type: boolean
         default: false
+      lanzado-por:
+        description: Solo lo rellena diverger-plan.yml al lanzar el bucle tras integrarse la PR del plan; a mano se deja vacío
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -148,7 +153,11 @@ jobs:
           # la issue y las filas de la telemetría lo dicen (EN-OPS-07, ADR 0047 del harness). Va con --notify, el nombre
           # que entiende cualquier núcleo: desde la 0.40.0 es el mismo que --launched-by.
           LANZADO_POR: ${{ github.actor }}
+          # Si el bucle lo lanzó diverger-plan.yml con el GITHUB_TOKEN, quien subió el plan (harness#711). Solo cuenta
+          # entonces: quien lanza a mano es github.actor, y no puede decir que lo lanzó otra persona.
+          LANZADO_POR_PLAN: ${{ inputs.lanzado-por }}
         run: |
+          [ "$LANZADO_POR" = "github-actions[bot]" ] && LANZADO_POR="$LANZADO_POR_PLAN"
           opciones=(--initiative "$INICIATIVA" --repo "$GITHUB_REPOSITORY" --base "$GITHUB_REF_NAME"
                     --project "$GITHUB_WORKSPACE" --results "$RUNNER_TEMP/resultados.jsonl")
           # El límite de workers de código es el del proyecto (maxCodeWorkers, ADR 0035); la entrada solo lo baja.

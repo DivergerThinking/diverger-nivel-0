@@ -1,12 +1,16 @@
 // Quién lanzó una ejecución del harness (EN-OPS-06, RQ.066, ADR 0008 del harness). Lo dice GitHub, no
 // el modelo: es quien lanzó el job del worker o, si lo lanzó el bucle con una cuenta de GitHub App, quien
-// lanzó ese bucle. Lo usan el worker, para los trailers de su commit, y el CI, para comprobarlos.
+// lanzó ese bucle. Si el bucle lo lanzó diverger-plan.yml al integrarse la PR del plan (harness#711), es
+// quien subió la rama del plan. Lo usan el worker, para los trailers de su commit, y el CI, para comprobarlos.
 // Uso: node scripts/lanzador.mjs <id del job del worker> <iniciativa>. Escribe en JSON
 // { login, id, nombre, ejecucion } y necesita GH_TOKEN (o GITHUB_TOKEN) con lectura de Actions.
 import { pathToFileURL } from "node:url";
 
 export const WORKFLOW_WORKER = ".github/workflows/diverger-worker.yml";
 export const WORKFLOW_BUCLE = ".github/workflows/diverger-bucle.yml";
+export const WORKFLOW_PLAN = ".github/workflows/diverger-plan.yml";
+/** La cuenta del GITHUB_TOKEN de un job: con ella lanza diverger-plan.yml el bucle al integrarse la PR del plan. */
+export const ACTIONS = "github-actions[bot]";
 
 /** Las cuentas de las GitHub Apps acaban en [bot]: nunca son la persona responsable. */
 export function esBot(login) {
@@ -74,12 +78,40 @@ export async function quienLanzo({ api, repo, ejecucion, iniciativa, pr }) {
         : `No se encuentra el bucle de ${iniciativa} que lanzó el worker ${ejecucion}`);
     }
     lanzada = candidatos[0];
+    if (lanzada.actor?.login === ACTIONS) {
+      // Con el GITHUB_TOKEN de un job solo lanza el bucle diverger-plan.yml, al integrarse la PR del plan
+      // (harness#711). La persona es quien subió la rama del plan: el actor del push que abrió esa PR.
+      lanzada = await quienSubioElPlan({ api, repo, iniciativa, bucle: lanzada });
+    }
   }
   const login = lanzada.actor?.login ?? "";
   if (!login || esBot(login)) {
     throw new Error(`La ejecución ${lanzada.id} la lanzó ${login || "nadie"}, que no es una persona`);
   }
   return { ...await persona(api, login), ejecucion: lanzada.html_url };
+}
+
+/**
+ * La ejecución de diverger-plan.yml del push de la rama del plan de `iniciativa` (plan/<iniciativa>, o con el sufijo
+ * numérico que da el núcleo cuando esa rama ya existía), la última anterior al bucle. Su actor es quien subió la rama.
+ * Lanza un Error si no hay ninguna: un bucle lanzado con el GITHUB_TOKEN sin un plan subido antes no es de nadie.
+ */
+async function quienSubioElPlan({ api, repo, iniciativa, bucle }) {
+  const inicio = Date.parse(bucle.run_started_at ?? bucle.created_at);
+  // Sin construir una expresión regular con la iniciativa, que llega de fuera: la rama es plan/<iniciativa> o esa
+  // misma con un sufijo numérico.
+  const base = `plan/${iniciativa}`;
+  const esDelPlan = (rama) => rama === base || (rama.startsWith(`${base}-`) && /^[0-9]+$/.test(rama.slice(base.length + 1)));
+  const { workflow_runs: planes = [] } = await api(
+    `repos/${repo}/actions/workflows/diverger-plan.yml/runs?event=push&per_page=100&created=${encodeURIComponent(`<=${bucle.created_at}`)}`);
+  const subidas = planes.filter((p) => ruta(p.path) === WORKFLOW_PLAN && p.event === "push"
+    && esDelPlan(p.head_branch ?? "") && Date.parse(p.created_at) <= inicio)
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  if (!subidas.length) {
+    throw new Error(`El bucle ${bucle.id} de ${iniciativa} se lanzó al integrarse un plan, `
+      + `y no se encuentra quién subió la rama plan/${iniciativa}`);
+  }
+  return { ...subidas[0], html_url: bucle.html_url };
 }
 
 /**
