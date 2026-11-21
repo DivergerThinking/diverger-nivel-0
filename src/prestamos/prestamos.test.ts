@@ -151,6 +151,80 @@ describe("POST /api/equipos/{id}/prestamo", () => {
   });
 });
 
+describe("POST /api/equipos/{id}/devolucion", () => {
+  const devolver = (app: Awaited<ReturnType<typeof servidor>>, id: string, headers = AUTH) =>
+    app.inject({ method: "POST", url: `/api/equipos/${id}/devolucion`, headers });
+
+  it("apunta la devolución, responde 200 con prestado: false y el equipo vuelve a figurar libre", async () => {
+    const almacen = almacenEnMemoria();
+    const app = await servidor(almacen);
+    const id = await darDeAlta(app, "Portátil 07");
+    await almacen.guardar("prestamos_activos", id, { persona: "Ana Pérez", devolucion: "2026-11-20" });
+    const r = await devolver(app, id);
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ id, nombre: "Portátil 07", prestado: false });
+    const lista = await app.inject({ method: "GET", url: "/api/equipos", headers: AUTH });
+    expect(lista.json()).toEqual([{ id, nombre: "Portátil 07", prestado: false }]);
+    expect(await almacen.listar("prestamos_activos")).toEqual([]);
+  });
+
+  it("permite volver a prestar el equipo tras devolverlo", async () => {
+    const app = await servidor();
+    const id = await darDeAlta(app, "Portátil 07");
+    await app.inject({
+      method: "POST",
+      url: `/api/equipos/${id}/prestamo`,
+      headers: AUTH,
+      payload: { persona: "Ana Pérez", devolucion: "2026-11-20" },
+    });
+    expect((await devolver(app, id)).statusCode).toBe(200);
+    const r = await app.inject({
+      method: "POST",
+      url: `/api/equipos/${id}/prestamo`,
+      headers: AUTH,
+      payload: { persona: "Luis Gil", devolucion: "2026-11-27" },
+    });
+    expect(r.statusCode).toBe(201);
+  });
+
+  it("responde 409 si el equipo no está prestado y sigue sin prestar", async () => {
+    const almacen = almacenEnMemoria();
+    const app = await servidor(almacen);
+    const id = await darDeAlta(app, "Proyector sala 2");
+    const r = await devolver(app, id);
+    expect(r.statusCode).toBe(409);
+    expect(r.json()).toEqual({ error: "El equipo no está prestado" });
+    expect(await almacen.listar("prestamos_activos")).toEqual([]);
+  });
+
+  it("solo devuelve una vez con dos peticiones a la vez", async () => {
+    const almacen = almacenEnMemoria();
+    const app = await servidor(almacen);
+    const id = await darDeAlta(app, "Portátil 07");
+    await almacen.guardar("prestamos_activos", id, { persona: "Ana Pérez", devolucion: "2026-11-20" });
+    const respuestas = await Promise.all([devolver(app, id), devolver(app, id)]);
+    expect(respuestas.map((r) => r.statusCode).sort()).toEqual([200, 409]);
+  });
+
+  it("responde 404 si el equipo no existe", async () => {
+    const app = await servidor();
+    const r = await devolver(app, "eq-999");
+    expect(r.statusCode).toBe(404);
+    expect(r.json()).toEqual({ error: "No existe el equipo" });
+  });
+
+  it("responde 401 sin un token válido y no devuelve el equipo", async () => {
+    const almacen = almacenEnMemoria();
+    const app = await servidor(almacen);
+    const id = await darDeAlta(app, "Portátil 07");
+    await almacen.guardar("prestamos_activos", id, { persona: "Ana Pérez", devolucion: "2026-11-20" });
+    const r = await devolver(app, id, { authorization: "Bearer malo" });
+    expect(r.statusCode).toBe(401);
+    expect(r.json()).toEqual({ error: "Inicia sesión con Google." });
+    expect(await almacen.listar("prestamos_activos")).toHaveLength(1);
+  });
+});
+
 describe("listarEquiposConPrestamo", () => {
   it("devuelve los equipos con su préstamo para otros contextos", async () => {
     const almacen = almacenEnMemoria();

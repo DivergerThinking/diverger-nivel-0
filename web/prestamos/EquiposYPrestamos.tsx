@@ -84,6 +84,17 @@ export function EquiposYPrestamos({ sesion }: { sesion: Sesion }) {
     }
   }
 
+  /** Apunta la devolución con POST /api/equipos/{id}/devolucion y recarga la lista; si falla, enseña el mensaje de la API. */
+  async function devolver(id: string): Promise<void> {
+    setError(null);
+    try {
+      await api(sesion, `/api/equipos/${encodeURIComponent(id)}/devolucion`, { metodo: "POST" });
+      setVersion((v) => v + 1);
+    } catch (motivo: unknown) {
+      setError(motivo instanceof Error ? motivo.message : String(motivo));
+    }
+  }
+
   return (
     <section aria-labelledby="prestamos-equipos">
       <h2 id="prestamos-equipos">Equipos y préstamos</h2>
@@ -99,6 +110,16 @@ export function EquiposYPrestamos({ sesion }: { sesion: Sesion }) {
                   : `${equipo.nombre}: no prestado`}
               </span>
               {!equipo.prestado && <FormularioDePrestamo equipo={equipo} alApuntar={prestar} />}
+              {equipo.prestado && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void devolver(equipo.id);
+                  }}
+                >
+                  Apuntar devolución de {equipo.nombre}
+                </button>
+              )}
             </li>
           ))}
         </ul>

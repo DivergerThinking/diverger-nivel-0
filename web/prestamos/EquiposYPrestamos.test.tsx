@@ -106,7 +106,7 @@ describe("pantalla Equipos y préstamos", () => {
     });
   });
 
-  it("no enseña el formulario en un equipo prestado", async () => {
+  it("no enseña el formulario de préstamo en un equipo prestado, solo la devolución", async () => {
     vi.stubGlobal("fetch", () =>
       Promise.resolve(
         respuesta([{ id: "e1", nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" }]),
@@ -114,7 +114,66 @@ describe("pantalla Equipos y préstamos", () => {
     );
     render(<EquiposYPrestamos sesion={SESION} />);
     await screen.findByText("Portátil 07: prestado a Ana Pérez hasta 2026-11-20");
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByLabelText("Persona de Portátil 07")).toBeNull();
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Apuntar devolución de Portátil 07"]);
+  });
+
+  it("no enseña la devolución en un equipo sin prestar", async () => {
+    vi.stubGlobal("fetch", () => Promise.resolve(respuesta([{ id: "e2", nombre: "Proyector sala 2", prestado: false }])));
+    render(<EquiposYPrestamos sesion={SESION} />);
+    await screen.findByText("Proyector sala 2: no prestado");
+    expect(screen.queryByRole("button", { name: "Apuntar devolución de Proyector sala 2" })).toBeNull();
+  });
+
+  it("apunta la devolución desde la lista y la enseña al día", async () => {
+    let devuelto = false;
+    const fetch = vi.fn((ruta: string) => {
+      if (ruta === "/api/equipos/e1/devolucion") {
+        devuelto = true;
+        return Promise.resolve(respuesta({ id: "e1", nombre: "Portátil 07", prestado: false }));
+      }
+      return Promise.resolve(
+        respuesta([
+          devuelto
+            ? { id: "e1", nombre: "Portátil 07", prestado: false }
+            : { id: "e1", nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" },
+        ]),
+      );
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(<EquiposYPrestamos sesion={SESION} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Apuntar devolución de Portátil 07" }));
+    expect(await screen.findByText("Portátil 07: no prestado")).toBeTruthy();
+    expect(fetch).toHaveBeenCalledWith("/api/equipos/e1/devolucion", {
+      method: "POST",
+      headers: { authorization: "Bearer token-de-ana" },
+    });
+  });
+
+  it("enseña «El equipo no está prestado» cuando la API responde 409 a la devolución", async () => {
+    vi.stubGlobal("fetch", (ruta: string) =>
+      Promise.resolve(
+        ruta === "/api/equipos/e1/devolucion"
+          ? respuesta({ error: "El equipo no está prestado" }, 409)
+          : respuesta([{ id: "e1", nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" }]),
+      ),
+    );
+    render(<EquiposYPrestamos sesion={SESION} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Apuntar devolución de Portátil 07" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("El equipo no está prestado");
+  });
+
+  it("enseña «No existe el equipo» cuando la API responde 404 a la devolución", async () => {
+    vi.stubGlobal("fetch", (ruta: string) =>
+      Promise.resolve(
+        ruta === "/api/equipos/e1/devolucion"
+          ? respuesta({ error: "No existe el equipo" }, 404)
+          : respuesta([{ id: "e1", nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" }]),
+      ),
+    );
+    render(<EquiposYPrestamos sesion={SESION} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Apuntar devolución de Portátil 07" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("No existe el equipo");
   });
 
   it("enseña tal cual el mensaje de error de la API", async () => {

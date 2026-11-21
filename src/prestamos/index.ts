@@ -3,12 +3,13 @@ import type { FastifyPluginAsync } from "fastify";
 import "../../lib/auth.js";
 import type { OpcionesContexto } from "../../lib/datos.js";
 import type { components } from "./api.gen.js";
-import { listarEquiposConPrestamo, prestarEquipo } from "./prestamos.js";
+import { devolverEquipo, listarEquiposConPrestamo, prestarEquipo } from "./prestamos.js";
 
 export { listarEquiposConPrestamo, type EquipoConPrestamo } from "./prestamos.js";
 
 type EquipoConPrestamo = components["schemas"]["EquipoConPrestamo"];
 type EquipoPrestado = components["schemas"]["EquipoPrestado"];
+type EquipoDevuelto = components["schemas"]["EquipoDevuelto"];
 type ErrorDeLaApi = components["schemas"]["Error"];
 
 /** Rutas del contrato spec/contextos/prestamos/api.openapi.json. */
@@ -34,6 +35,19 @@ export const rutas: FastifyPluginAsync<OpcionesContexto> = (app, { almacen }) =>
     }
     const equipo: EquipoPrestado = { ...resultado.equipo, prestado: true };
     return reply.code(201).send(equipo);
+  });
+  app.post<{ Params: { id: string } }>("/api/equipos/:id/devolucion", async (request, reply) => {
+    const resultado = await devolverEquipo(almacen, request.params.id);
+    if (resultado.tipo === "no-existe") {
+      const error: ErrorDeLaApi = { error: "No existe el equipo" };
+      return reply.code(404).send(error);
+    }
+    if (resultado.tipo === "no-prestado") {
+      const error: ErrorDeLaApi = { error: "El equipo no está prestado" };
+      return reply.code(409).send(error);
+    }
+    const equipo: EquipoDevuelto = { ...resultado.equipo, prestado: false };
+    return reply.code(200).send(equipo);
   });
   return Promise.resolve();
 };

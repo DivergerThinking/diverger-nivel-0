@@ -59,6 +59,25 @@ export async function prestarEquipo(
   });
 }
 
+export type ResultadoDevolucion =
+  | { tipo: "devuelto"; equipo: { id: string; nombre: string } }
+  | { tipo: "no-existe" }
+  | { tipo: "no-prestado" };
+
+/**
+ * Apunta la devolución de un equipo. Comprueba que el equipo existe y, en una transacción, que está prestado y
+ * borra su préstamo activo (ADR 0002).
+ */
+export async function devolverEquipo(almacen: Almacen, idEquipo: string): Promise<ResultadoDevolucion> {
+  const equipo = await obtenerEquipo(almacen, idEquipo);
+  if (!equipo) return { tipo: "no-existe" };
+  return almacen.transaccion<ResultadoDevolucion>(async (tx) => {
+    if (!(await tx.obtener<PrestamoActivo>(PRESTAMOS_ACTIVOS, equipo.id))) return { tipo: "no-prestado" };
+    tx.borrar(PRESTAMOS_ACTIVOS, equipo.id);
+    return { tipo: "devuelto", equipo: { id: equipo.id, nombre: equipo.nombre } };
+  });
+}
+
 /** Los equipos con su préstamo activo, si lo tienen. Lee sin transacción. */
 export async function listarEquiposConPrestamo(almacen: Almacen): Promise<EquipoConPrestamo[]> {
   const equipos = await listarEquipos(almacen);
