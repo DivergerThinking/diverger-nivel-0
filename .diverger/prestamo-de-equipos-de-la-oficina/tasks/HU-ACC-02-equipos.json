@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "HU-ACC-02-equipos",
   "title": "Equipos: conectar el inventario de IT por la API (HU-ACC-02)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-ACC-02",
   "context": "equipos",
   "modules": ["src/equipos"],
