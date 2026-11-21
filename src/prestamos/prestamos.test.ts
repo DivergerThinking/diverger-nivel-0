@@ -38,6 +38,23 @@ describe("prestar un equipo", () => {
     expect((await prestar({ persona: "Ana Pérez", devolucion: "2020-01-31" })).statusCode).toBe(201);
   });
 
+  it("acepta la fecha pasada «2026-11-20», la devuelve igual y la lista la muestra", async () => {
+    const { id, prestar, lista } = await conPortatil();
+    const respuesta = await prestar({ persona: "Ana Pérez", devolucion: "2026-11-20" });
+    expect(respuesta.statusCode).toBe(201);
+    const esperado = { id, nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" };
+    expect(respuesta.json()).toEqual(esperado);
+    expect(await lista()).toEqual([esperado]);
+  });
+
+  it("responde 400 con la fecha «20/11/2026» en otro formato", async () => {
+    const { prestar, lista } = await conPortatil();
+    const respuesta = await prestar({ persona: "Ana Pérez", devolucion: "20/11/2026" });
+    expect(respuesta.statusCode).toBe(400);
+    expect(respuesta.json()).toEqual({ error: "La fecha de devolución no es válida" });
+    expect(await lista()).toEqual([expect.objectContaining({ prestado: false })]);
+  });
+
   it.each([
     ["la persona vacía", { persona: "", devolucion: "2026-12-04" }],
     ["la persona con solo espacios", { persona: "  ", devolucion: "2026-12-04" }],
