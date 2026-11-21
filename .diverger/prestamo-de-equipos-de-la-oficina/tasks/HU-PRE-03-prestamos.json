@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "HU-PRE-03-prestamos",
   "title": "Préstamos: apuntar la devolución de un equipo (HU-PRE-03)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-PRE-03",
   "context": "prestamos",
   "modules": ["src/prestamos", "web/prestamos"],
