@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "HU-ACC-02-prestamos",
   "title": "Préstamos: conectar el inventario de IT con una cuenta de servicio (HU-ACC-02)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-ACC-02",
   "context": "prestamos",
   "modules": ["src/prestamos"],
