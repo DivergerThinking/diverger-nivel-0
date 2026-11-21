@@ -42,6 +42,7 @@ describe("apuntar un préstamo", () => {
 
   it.each([
     [400, "Faltan la persona o la fecha de devolución"],
+    [400, "La fecha de devolución no es válida"],
     [404, "No existe el equipo"],
     [409, "El equipo ya está prestado"],
   ])("con un %i enseña el mensaje de la API y el equipo sigue sin prestar", async (status, mensaje) => {
