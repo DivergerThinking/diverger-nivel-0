@@ -1,0 +1,46 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { Sesion } from "../pantallas.js";
+import { AltaDeEquipo } from "./AltaDeEquipo.js";
+
+const SESION: Sesion = { token: "token-de-ana", persona: { email: "ana.perez@example.com", nombre: "Ana" } };
+
+function respuesta(cuerpo: unknown, status = 200): Response {
+  return new Response(JSON.stringify(cuerpo), { status, headers: { "content-type": "application/json" } });
+}
+
+function darDeAlta(nombre: string) {
+  fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: nombre } });
+  fireEvent.click(screen.getByRole("button", { name: "Dar de alta" }));
+}
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("pantalla Alta de equipo", () => {
+  it("da de alta el equipo con el token de la sesión y lo enseña como no prestado", async () => {
+    const fetch = vi.fn(() => Promise.resolve(respuesta({ id: "e1", nombre: "Portátil 07", prestado: false }, 201)));
+    vi.stubGlobal("fetch", fetch);
+    render(<AltaDeEquipo sesion={SESION} />);
+    darDeAlta("Portátil 07");
+    expect(await screen.findByText("Portátil 07: no prestado")).toBeTruthy();
+    expect(fetch).toHaveBeenCalledWith("/api/equipos", {
+      method: "POST",
+      headers: { authorization: "Bearer token-de-ana", "content-type": "application/json" },
+      body: JSON.stringify({ nombre: "Portátil 07" }),
+    });
+  });
+
+  it.each([
+    [400, "Falta el nombre del equipo"],
+    [409, "Ya hay un equipo con ese nombre"],
+    [401, "Inicia sesión con Google."],
+  ])("enseña tal cual el mensaje de error %i de la API", async (status, mensaje) => {
+    vi.stubGlobal("fetch", () => Promise.resolve(respuesta({ error: mensaje }, status)));
+    render(<AltaDeEquipo sesion={SESION} />);
+    darDeAlta("Portátil 07");
+    expect((await screen.findByRole("alert")).textContent).toBe(mensaje);
+  });
+});
