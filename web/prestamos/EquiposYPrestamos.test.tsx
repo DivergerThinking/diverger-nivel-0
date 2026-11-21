@@ -84,6 +84,28 @@ describe("pantalla Equipos y préstamos", () => {
     expect((await screen.findByRole("alert")).textContent).toBe("Faltan la persona o la fecha de devolución");
   });
 
+  it("enseña «La fecha de devolución no es válida» y deja el equipo sin prestar cuando la API responde 400", async () => {
+    const fetch = vi.fn((ruta: string) =>
+      Promise.resolve(
+        ruta === "/api/equipos/e2/prestamo"
+          ? respuesta({ error: "La fecha de devolución no es válida" }, 400)
+          : respuesta([{ id: "e2", nombre: "Proyector sala 2", prestado: false }]),
+      ),
+    );
+    vi.stubGlobal("fetch", fetch);
+    render(<EquiposYPrestamos sesion={SESION} />);
+    fireEvent.change(await screen.findByLabelText("Persona de Proyector sala 2"), { target: { value: "Luis Gil" } });
+    fireEvent.change(screen.getByLabelText("Devolución de Proyector sala 2"), { target: { value: "2026-11-20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apuntar préstamo de Proyector sala 2" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("La fecha de devolución no es válida");
+    expect(screen.getByText("Proyector sala 2: no prestado")).toBeTruthy();
+    expect(fetch).toHaveBeenCalledWith("/api/equipos/e2/prestamo", {
+      method: "POST",
+      headers: { authorization: "Bearer token-de-ana", "content-type": "application/json" },
+      body: JSON.stringify({ persona: "Luis Gil", devolucion: "2026-11-20" }),
+    });
+  });
+
   it("no enseña el formulario en un equipo prestado", async () => {
     vi.stubGlobal("fetch", () =>
       Promise.resolve(
