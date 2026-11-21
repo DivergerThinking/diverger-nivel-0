@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { Sesion } from "../pantallas.js";
 import { EquiposYPrestamos } from "./EquiposYPrestamos.js";
 
@@ -39,6 +39,60 @@ describe("pantalla Equipos y préstamos", () => {
     render(<EquiposYPrestamos sesion={SESION} />);
     expect(await screen.findByText("No hay equipos.")).toBeTruthy();
     expect(screen.queryByRole("listitem")).toBeNull();
+  });
+
+  it("apunta el préstamo desde la lista y la enseña al día", async () => {
+    let prestado = false;
+    const fetch = vi.fn((ruta: string) => {
+      if (ruta === "/api/equipos/e2/prestamo") {
+        prestado = true;
+        return Promise.resolve(
+          respuesta({ id: "e2", nombre: "Proyector sala 2", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" }, 201),
+        );
+      }
+      return Promise.resolve(
+        respuesta([
+          prestado
+            ? { id: "e2", nombre: "Proyector sala 2", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" }
+            : { id: "e2", nombre: "Proyector sala 2", prestado: false },
+        ]),
+      );
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(<EquiposYPrestamos sesion={SESION} />);
+    fireEvent.change(await screen.findByLabelText("Persona de Proyector sala 2"), { target: { value: "Ana Pérez" } });
+    fireEvent.change(screen.getByLabelText("Devolución de Proyector sala 2"), { target: { value: "2026-11-20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apuntar préstamo de Proyector sala 2" }));
+    expect(await screen.findByText("Proyector sala 2: prestado a Ana Pérez hasta 2026-11-20")).toBeTruthy();
+    expect(fetch).toHaveBeenCalledWith("/api/equipos/e2/prestamo", {
+      method: "POST",
+      headers: { authorization: "Bearer token-de-ana", "content-type": "application/json" },
+      body: JSON.stringify({ persona: "Ana Pérez", devolucion: "2026-11-20" }),
+    });
+  });
+
+  it("enseña tal cual el mensaje de la API cuando falla apuntar el préstamo", async () => {
+    vi.stubGlobal("fetch", (ruta: string) =>
+      Promise.resolve(
+        ruta.endsWith("/prestamo")
+          ? respuesta({ error: "Faltan la persona o la fecha de devolución" }, 400)
+          : respuesta([{ id: "e1", nombre: "Portátil 07", prestado: false }]),
+      ),
+    );
+    render(<EquiposYPrestamos sesion={SESION} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Apuntar préstamo de Portátil 07" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("Faltan la persona o la fecha de devolución");
+  });
+
+  it("no enseña el formulario en un equipo prestado", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(
+        respuesta([{ id: "e1", nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" }]),
+      ),
+    );
+    render(<EquiposYPrestamos sesion={SESION} />);
+    await screen.findByText("Portátil 07: prestado a Ana Pérez hasta 2026-11-20");
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("enseña tal cual el mensaje de error de la API", async () => {

@@ -64,6 +64,93 @@ describe("GET /api/equipos", () => {
   });
 });
 
+describe("POST /api/equipos/{id}/prestamo", () => {
+  const prestar = (app: Awaited<ReturnType<typeof servidor>>, id: string, payload: object, headers = AUTH) =>
+    app.inject({ method: "POST", url: `/api/equipos/${id}/prestamo`, headers, payload });
+
+  it("apunta el préstamo y responde 201 con el equipo prestado", async () => {
+    const almacen = almacenEnMemoria();
+    const app = await servidor(almacen);
+    const id = await darDeAlta(app, "Portátil 07");
+    const r = await prestar(app, id, { persona: "Ana Pérez", devolucion: "2026-11-20" });
+    expect(r.statusCode).toBe(201);
+    expect(r.json()).toEqual({ id, nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" });
+    const lista = await app.inject({ method: "GET", url: "/api/equipos", headers: AUTH });
+    expect(lista.json()).toContainEqual({ id, nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" });
+  });
+
+  it("acepta una fecha pasada", async () => {
+    const app = await servidor();
+    const id = await darDeAlta(app, "Portátil 07");
+    const r = await prestar(app, id, { persona: "Ana Pérez", devolucion: "2020-01-31" });
+    expect(r.statusCode).toBe(201);
+  });
+
+  it("responde 400 sin persona o sin fecha y no presta el equipo", async () => {
+    const almacen = almacenEnMemoria();
+    const app = await servidor(almacen);
+    const id = await darDeAlta(app, "Portátil 07");
+    for (const payload of [{ devolucion: "2026-11-20" }, { persona: "Ana Pérez" }, { persona: "  ", devolucion: "2026-11-20" }, {}]) {
+      const r = await prestar(app, id, payload);
+      expect(r.statusCode).toBe(400);
+      expect(r.json()).toEqual({ error: "Faltan la persona o la fecha de devolución" });
+    }
+    expect(await almacen.listar("prestamos_activos")).toEqual([]);
+  });
+
+  it("responde 400 si la fecha no es una fecha real", async () => {
+    const almacen = almacenEnMemoria();
+    const app = await servidor(almacen);
+    const id = await darDeAlta(app, "Portátil 07");
+    for (const devolucion of ["2026-02-30", "20-11-2026", "mañana"]) {
+      const r = await prestar(app, id, { persona: "Ana Pérez", devolucion });
+      expect(r.statusCode).toBe(400);
+      expect(r.json()).toEqual({ error: "La fecha de devolución no es válida" });
+    }
+    expect(await almacen.listar("prestamos_activos")).toEqual([]);
+  });
+
+  it("responde 409 si el equipo ya está prestado y no cambia su préstamo", async () => {
+    const app = await servidor();
+    const id = await darDeAlta(app, "Portátil 07");
+    await prestar(app, id, { persona: "Ana Pérez", devolucion: "2026-11-20" });
+    const r = await prestar(app, id, { persona: "Luis Gil", devolucion: "2026-11-27" });
+    expect(r.statusCode).toBe(409);
+    expect(r.json()).toEqual({ error: "El equipo ya está prestado" });
+    const lista = await app.inject({ method: "GET", url: "/api/equipos", headers: AUTH });
+    expect(lista.json()).toEqual([{ id, nombre: "Portátil 07", prestado: true, persona: "Ana Pérez", devolucion: "2026-11-20" }]);
+  });
+
+  it("solo presta una vez con dos peticiones a la vez", async () => {
+    const app = await servidor();
+    const id = await darDeAlta(app, "Portátil 07");
+    const respuestas = await Promise.all([
+      prestar(app, id, { persona: "Ana Pérez", devolucion: "2026-11-20" }),
+      prestar(app, id, { persona: "Luis Gil", devolucion: "2026-11-27" }),
+    ]);
+    expect(respuestas.map((r) => r.statusCode).sort()).toEqual([201, 409]);
+  });
+
+  it("responde 404 si el equipo no existe y no guarda ningún préstamo", async () => {
+    const almacen = almacenEnMemoria();
+    const app = await servidor(almacen);
+    const r = await prestar(app, "eq-999", { persona: "Ana Pérez", devolucion: "2026-11-20" });
+    expect(r.statusCode).toBe(404);
+    expect(r.json()).toEqual({ error: "No existe el equipo" });
+    expect(await almacen.listar("prestamos_activos")).toEqual([]);
+  });
+
+  it("responde 401 sin un token válido y no presta el equipo", async () => {
+    const almacen = almacenEnMemoria();
+    const app = await servidor(almacen);
+    const id = await darDeAlta(app, "Portátil 07");
+    const r = await prestar(app, id, { persona: "Ana Pérez", devolucion: "2026-11-20" }, { authorization: "Bearer malo" });
+    expect(r.statusCode).toBe(401);
+    expect(r.json()).toEqual({ error: "Inicia sesión con Google." });
+    expect(await almacen.listar("prestamos_activos")).toEqual([]);
+  });
+});
+
 describe("listarEquiposConPrestamo", () => {
   it("devuelve los equipos con su préstamo para otros contextos", async () => {
     const almacen = almacenEnMemoria();
