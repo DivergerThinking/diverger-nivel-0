@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "HU-EQU-03-prestamos",
+  "title": "Préstamos: ver los equipos y a quién están prestados (HU-EQU-03)",
+  "status": "pending",
+  "story": "HU-EQU-03",
+  "context": "prestamos",
+  "modules": ["src/prestamos", "web/prestamos"],
+  "contracts": ["spec/contextos/prestamos/api.openapi.json"],
+  "dependsOn": ["HU-ACC-02-prestamos", "HU-EQU-01-equipos"]
+}

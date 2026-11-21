@@ -1,0 +1,80 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Equipos",
+    "version": "1.0.0",
+    "description": "Alta de los equipos de la oficina. Sigue la API fijada por el cliente (ADR 0001)."
+  },
+  "servers": [{ "url": "/" }],
+  "security": [{ "google": [] }],
+  "paths": {
+    "/api/equipos": {
+      "post": {
+        "operationId": "equipos.crearEquipo",
+        "summary": "Dar de alta un equipo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/EquipoNuevo" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Equipo dado de alta, sin prestar",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/EquipoCreado" } }
+            }
+          },
+          "400": {
+            "description": "Falta el nombre del equipo",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "401": {
+            "description": "Inicia sesión con Google.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          },
+          "409": {
+            "description": "Ya hay un equipo con ese nombre",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/Error" } }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "google": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Token de identidad de Google, con el correo verificado, emitido para el cliente OAuth de la aplicación; de una persona o de una cuenta de servicio"
+      }
+    },
+    "schemas": {
+      "EquipoNuevo": {
+        "type": "object",
+        "properties": { "nombre": { "type": "string" } }
+      },
+      "EquipoCreado": {
+        "type": "object",
+        "required": ["id", "nombre", "prestado"],
+        "properties": {
+          "id": { "type": "string" },
+          "nombre": { "type": "string" },
+          "prestado": { "type": "boolean", "const": false }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": { "error": { "type": "string" } }
+      }
+    }
+  }
+}
