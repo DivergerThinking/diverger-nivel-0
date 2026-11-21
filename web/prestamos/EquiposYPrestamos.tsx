@@ -9,10 +9,52 @@ interface EquipoConPrestamo {
   devolucion?: string;
 }
 
+function FormularioDePrestamo({
+  equipo,
+  alApuntar,
+}: {
+  equipo: EquipoConPrestamo;
+  alApuntar: (id: string, persona: string, devolucion: string) => Promise<void>;
+}) {
+  const [persona, setPersona] = useState("");
+  const [devolucion, setDevolucion] = useState("");
+  return (
+    <form
+      onSubmit={(evento) => {
+        evento.preventDefault();
+        void alApuntar(equipo.id, persona, devolucion);
+      }}
+    >
+      <label>
+        Persona de {equipo.nombre}
+        <input
+          value={persona}
+          onChange={(e) => {
+            setPersona(e.target.value);
+          }}
+        />
+      </label>
+      <label>
+        Devolución de {equipo.nombre}
+        <input
+          type="date"
+          value={devolucion}
+          onChange={(e) => {
+            setDevolucion(e.target.value);
+          }}
+        />
+      </label>
+      <button type="submit">Apuntar préstamo de {equipo.nombre}</button>
+    </form>
+  );
+}
+
 /** Enseña la lista de equipos con GET /api/equipos: si están prestados, a quién y hasta cuándo. */
 export function EquiposYPrestamos({ sesion }: { sesion: Sesion }) {
   const [equipos, setEquipos] = useState<EquipoConPrestamo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     let vigente = true;
@@ -26,7 +68,21 @@ export function EquiposYPrestamos({ sesion }: { sesion: Sesion }) {
     return () => {
       vigente = false;
     };
-  }, [sesion]);
+  }, [sesion, version]);
+
+  /** Apunta el préstamo con POST /api/equipos/{id}/prestamo y recarga la lista; si falla, enseña el mensaje de la API. */
+  async function prestar(id: string, persona: string, devolucion: string): Promise<void> {
+    setError(null);
+    try {
+      await api(sesion, `/api/equipos/${encodeURIComponent(id)}/prestamo`, {
+        metodo: "POST",
+        cuerpo: { persona, devolucion },
+      });
+      setVersion((v) => v + 1);
+    } catch (motivo: unknown) {
+      setError(motivo instanceof Error ? motivo.message : String(motivo));
+    }
+  }
 
   return (
     <section aria-labelledby="prestamos-equipos">
@@ -37,9 +93,12 @@ export function EquiposYPrestamos({ sesion }: { sesion: Sesion }) {
         <ul>
           {equipos.map((equipo) => (
             <li key={equipo.id}>
-              {equipo.prestado
-                ? `${equipo.nombre}: prestado a ${equipo.persona ?? ""} hasta ${equipo.devolucion ?? ""}`
-                : `${equipo.nombre}: no prestado`}
+              <span>
+                {equipo.prestado
+                  ? `${equipo.nombre}: prestado a ${equipo.persona ?? ""} hasta ${equipo.devolucion ?? ""}`
+                  : `${equipo.nombre}: no prestado`}
+              </span>
+              {!equipo.prestado && <FormularioDePrestamo equipo={equipo} alApuntar={prestar} />}
             </li>
           ))}
         </ul>
