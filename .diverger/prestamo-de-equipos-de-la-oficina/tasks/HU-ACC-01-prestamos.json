@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "HU-ACC-01-prestamos",
   "title": "Préstamos: exigir el inicio de sesión con Google (HU-ACC-01)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-ACC-01",
   "context": "prestamos",
   "modules": ["src/prestamos", "web/prestamos"],
