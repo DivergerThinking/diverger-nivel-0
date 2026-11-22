@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "HU-PRE-01-prestamos",
+  "title": "Préstamos: apuntar un préstamo (HU-PRE-01)",
+  "status": "pending",
+  "story": "HU-PRE-01",
+  "context": "prestamos",
+  "modules": ["src/prestamos", "web/prestamos"],
+  "contracts": ["spec/contextos/prestamos/api.openapi.json"],
+  "dependsOn": ["HU-EQU-02-prestamos", "HU-EQU-01-equipos", "HU-ACC-01-prestamos"]
+}
