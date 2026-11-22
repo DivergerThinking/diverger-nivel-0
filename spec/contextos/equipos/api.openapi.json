@@ -1,0 +1,92 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Equipos",
+    "version": "1.0.0",
+    "description": "Alta de los equipos de la oficina. Sigue la API fijada por el cliente (ADR 0003): rutas bajo /api/equipos y errores {\"error\": \"<mensaje>\"}."
+  },
+  "servers": [{ "url": "/" }],
+  "security": [{ "google": [] }],
+  "paths": {
+    "/api/equipos": {
+      "post": {
+        "operationId": "equipos.crearEquipo",
+        "summary": "Dar de alta un equipo",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/NuevoEquipo" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Equipo dado de alta",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Equipo" }
+              }
+            }
+          },
+          "400": {
+            "description": "Falta el nombre del equipo",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "example": { "error": "Falta el nombre del equipo" }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin un token válido",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "example": { "error": "Inicia sesión con Google." }
+              }
+            }
+          },
+          "409": {
+            "description": "Ya hay un equipo con ese nombre",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "example": { "error": "Ya hay un equipo con ese nombre" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "google": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+    },
+    "schemas": {
+      "NuevoEquipo": {
+        "type": "object",
+        "properties": {
+          "nombre": { "type": "string", "examples": ["Portátil 07"] }
+        }
+      },
+      "Equipo": {
+        "type": "object",
+        "required": ["id", "nombre", "prestado"],
+        "properties": {
+          "id": { "type": "string" },
+          "nombre": { "type": "string", "examples": ["Portátil 07"] },
+          "prestado": { "type": "boolean", "const": false }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": { "type": "string" }
+        }
+      }
+    }
+  }
+}

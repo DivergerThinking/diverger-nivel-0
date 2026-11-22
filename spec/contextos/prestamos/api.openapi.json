@@ -1,0 +1,164 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Préstamos",
+    "version": "1.0.0",
+    "description": "Préstamos y devoluciones de los equipos, y la lista de equipos con su préstamo. Sigue la API fijada por el cliente (ADR 0003): rutas bajo /api/equipos y errores {\"error\": \"<mensaje>\"}."
+  },
+  "servers": [{ "url": "/" }],
+  "security": [{ "google": [] }],
+  "paths": {
+    "/api/equipos": {
+      "get": {
+        "operationId": "prestamos.listarEquipos",
+        "summary": "Ver los equipos",
+        "responses": {
+          "200": {
+            "description": "Lista de equipos; los prestados llevan también persona y devolucion",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/EquipoConPrestamo" }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/SinSesion" }
+        }
+      }
+    },
+    "/api/equipos/{id}/prestamo": {
+      "post": {
+        "operationId": "prestamos.prestarEquipo",
+        "summary": "Prestar un equipo",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/NuevoPrestamo" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Equipo prestado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EquipoConPrestamo" }
+              }
+            }
+          },
+          "400": {
+            "description": "Faltan la persona o la fecha de devolución, o la fecha de devolución no es válida",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "examples": {
+                  "faltanDatos": { "value": { "error": "Faltan la persona o la fecha de devolución" } },
+                  "fechaNoValida": { "value": { "error": "La fecha de devolución no es válida" } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/SinSesion" },
+          "404": { "$ref": "#/components/responses/NoExisteElEquipo" },
+          "409": {
+            "description": "El equipo ya está prestado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "example": { "error": "El equipo ya está prestado" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/equipos/{id}/devolucion": {
+      "post": {
+        "operationId": "prestamos.devolverEquipo",
+        "summary": "Apuntar la devolución",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Devolución apuntada; el equipo vuelve con prestado false",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EquipoConPrestamo" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/SinSesion" },
+          "404": { "$ref": "#/components/responses/NoExisteElEquipo" },
+          "409": {
+            "description": "El equipo no está prestado",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" },
+                "example": { "error": "El equipo no está prestado" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "google": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+    },
+    "responses": {
+      "SinSesion": {
+        "description": "Sin un token válido",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" },
+            "example": { "error": "Inicia sesión con Google." }
+          }
+        }
+      },
+      "NoExisteElEquipo": {
+        "description": "No existe el equipo",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" },
+            "example": { "error": "No existe el equipo" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "NuevoPrestamo": {
+        "type": "object",
+        "properties": {
+          "persona": { "type": "string", "examples": ["Ana Pérez"] },
+          "devolucion": { "type": "string", "description": "Fecha AAAA-MM-DD que exista; se acepta una fecha pasada.", "examples": ["2026-11-20"] }
+        }
+      },
+      "EquipoConPrestamo": {
+        "type": "object",
+        "required": ["id", "nombre", "prestado"],
+        "properties": {
+          "id": { "type": "string" },
+          "nombre": { "type": "string", "examples": ["Portátil 07"] },
+          "prestado": { "type": "boolean" },
+          "persona": { "type": "string", "description": "Solo si está prestado.", "examples": ["Ana Pérez"] },
+          "devolucion": { "type": "string", "description": "Solo si está prestado; AAAA-MM-DD, igual que se envió.", "examples": ["2026-11-20"] }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": { "type": "string" }
+        }
+      }
+    }
+  }
+}
