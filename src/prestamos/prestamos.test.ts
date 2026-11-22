@@ -11,8 +11,54 @@ async function servidor() {
   const listar = () => app.inject({ method: "GET", url: "/api/equipos" });
   const prestar = (id: string, cuerpo?: object) =>
     app.inject({ method: "POST", url: `/api/equipos/${id}/prestamo`, ...(cuerpo ? { payload: cuerpo } : {}) });
-  return { almacen, listar, prestar };
+  const devolver = (id: string) => app.inject({ method: "POST", url: `/api/equipos/${id}/devolucion` });
+  return { almacen, listar, prestar, devolver };
 }
+
+describe("POST /api/equipos/:id/devolucion", () => {
+  it("responde 200 con el equipo libre y borra el préstamo", async () => {
+    const { almacen, devolver } = await servidor();
+    await almacen.guardar("equipos_equipos", "e1", { id: "e1", nombre: "Portátil 07" });
+    await almacen.guardar(PRESTAMOS_ACTIVOS, "e1", { persona: "Ana Pérez", devolucion: "2026-12-15" });
+    const respuesta = await devolver("e1");
+    expect(respuesta.statusCode).toBe(200);
+    expect(respuesta.json()).toEqual({ id: "e1", nombre: "Portátil 07", prestado: false });
+    expect(await almacen.obtener(PRESTAMOS_ACTIVOS, "e1")).toBeUndefined();
+  });
+
+  it("un equipo devuelto se puede prestar a otra persona", async () => {
+    const { almacen, devolver, prestar } = await servidor();
+    await almacen.guardar("equipos_equipos", "e1", { id: "e1", nombre: "Portátil 07" });
+    await almacen.guardar(PRESTAMOS_ACTIVOS, "e1", { persona: "Ana Pérez", devolucion: "2026-12-15" });
+    await devolver("e1");
+    const respuesta = await prestar("e1", { persona: "Luis Gómez", devolucion: "2027-01-10" });
+    expect(respuesta.statusCode).toBe(201);
+  });
+
+  it("responde 409 si el equipo está libre y sigue libre", async () => {
+    const { almacen, devolver } = await servidor();
+    await almacen.guardar("equipos_equipos", "e2", { id: "e2", nombre: "Proyector sala 2" });
+    const respuesta = await devolver("e2");
+    expect(respuesta.statusCode).toBe(409);
+    expect(respuesta.json()).toEqual({ error: "El equipo no está prestado" });
+    expect(await almacen.obtener(PRESTAMOS_ACTIVOS, "e2")).toBeUndefined();
+  });
+
+  it("responde 404 si el equipo no existe", async () => {
+    const { devolver } = await servidor();
+    const respuesta = await devolver("zzz-999");
+    expect(respuesta.statusCode).toBe(404);
+    expect(respuesta.json()).toEqual({ error: "No existe el equipo" });
+  });
+
+  it("con dos devoluciones a la vez solo una se apunta", async () => {
+    const { almacen, devolver } = await servidor();
+    await almacen.guardar("equipos_equipos", "e1", { id: "e1", nombre: "Portátil 07" });
+    await almacen.guardar(PRESTAMOS_ACTIVOS, "e1", { persona: "Ana Pérez", devolucion: "2026-12-15" });
+    const respuestas = await Promise.all([devolver("e1"), devolver("e1")]);
+    expect(respuestas.map((r) => r.statusCode).sort()).toEqual([200, 409]);
+  });
+});
 
 describe("GET /api/equipos", () => {
   it("responde 200 con una lista vacía si no hay equipos", async () => {
