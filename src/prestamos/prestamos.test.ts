@@ -32,4 +32,17 @@ describe("GET /api/equipos", () => {
       { id: "e2", nombre: "Proyector sala 2", prestado: false },
     ]);
   });
+
+  it("un equipo cuyo préstamo se ha cerrado aparece libre, sin persona ni devolución", async () => {
+    const { almacen, listar } = await servidor();
+    await almacen.guardar("equipos_equipos", "e1", { id: "e1", nombre: "Portátil 07" });
+    await almacen.guardar(PRESTAMOS_ACTIVOS, "e1", { persona: "Ana Pérez", devolucion: "2026-12-15" });
+    await almacen.borrar(PRESTAMOS_ACTIVOS, "e1");
+    const respuesta = await listar();
+    expect(respuesta.statusCode).toBe(200);
+    const [equipo] = respuesta.json<Record<string, unknown>[]>();
+    expect(equipo).toEqual({ id: "e1", nombre: "Portátil 07", prestado: false });
+    expect(equipo).not.toHaveProperty("persona");
+    expect(equipo).not.toHaveProperty("devolucion");
+  });
 });
