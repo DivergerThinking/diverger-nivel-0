@@ -17,6 +17,7 @@ export const FALTAN_DATOS = "Faltan la persona o la fecha de devolución";
 export const FECHA_NO_VALIDA = "La fecha de devolución no es válida";
 export const NO_EXISTE_EL_EQUIPO = "No existe el equipo";
 export const YA_PRESTADO = "El equipo ya está prestado";
+export const NO_ESTA_PRESTADO = "El equipo no está prestado";
 
 /** Un fallo de la regla de negocio, con el código HTTP y el mensaje que fija el contrato. */
 export class ErrorDePrestamos extends Error {
@@ -64,6 +65,20 @@ export async function prestarEquipo(
   });
 
   return { id: equipo.id, nombre: equipo.nombre, prestado: true, persona: prestatario, devolucion: fecha };
+}
+
+/** Apunta la devolución de un equipo y lo deja libre. Lanza ErrorDePrestamos si el equipo no existe (404) o no está prestado (409). */
+export async function devolverEquipo(almacen: Almacen, id: string): Promise<EquipoConEstado> {
+  const equipo = await obtenerEquipo(almacen, id);
+  if (!equipo) throw new ErrorDePrestamos(404, NO_EXISTE_EL_EQUIPO);
+
+  await almacen.transaccion(async (tx) => {
+    const existente = await tx.obtener<PrestamoActivo>(PRESTAMOS_ACTIVOS, id);
+    if (!existente) throw new ErrorDePrestamos(409, NO_ESTA_PRESTADO);
+    tx.borrar(PRESTAMOS_ACTIVOS, id);
+  });
+
+  return { id: equipo.id, nombre: equipo.nombre, prestado: false };
 }
 
 /** Todos los equipos con su estado: de los prestados, también la persona y la fecha de devolución. */
