@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "HU-EQU-02-prestamos",
   "title": "Préstamos: ver qué equipos están prestados (HU-EQU-02)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-EQU-02",
   "context": "prestamos",
   "modules": ["src/prestamos", "web/prestamos"],
