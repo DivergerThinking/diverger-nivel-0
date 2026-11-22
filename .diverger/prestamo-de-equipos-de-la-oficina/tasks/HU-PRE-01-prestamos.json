@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "HU-PRE-01-prestamos",
   "title": "Préstamos: apuntar el préstamo de un equipo (HU-PRE-01)",
-  "status": "pending",
+  "status": "done",
   "story": "HU-PRE-01",
   "context": "prestamos",
   "modules": ["src/prestamos", "web/prestamos"],
