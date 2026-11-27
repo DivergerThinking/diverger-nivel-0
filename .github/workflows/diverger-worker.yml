@@ -257,6 +257,10 @@ jobs:
           mkdir -p "$PLUGIN_NUCLEO/.claude-plugin" "$PLUGIN_NUCLEO/agents"
           echo '{"name": "diverger"}' > "$PLUGIN_NUCLEO/.claude-plugin/plugin.json"
           cp .diverger-dev/plugins/diverger/agents/revisor-codigo.md "$PLUGIN_NUCLEO/agents/"
+          # El modelo de cada agente que juzga: el de su cabecera, que propone el harness, o el que fija el proyecto en
+          # models de .diverger/settings.json (harness#1107, ADR 0081). Se cambia en la copia, nunca en el núcleo.
+          bash .github/diverger/modelo-agente.sh "$PLUGIN_NUCLEO/agents/revisor-codigo.md" codeReviewer
+          bash .github/diverger/modelo-agente.sh "$PLUGIN_QUALITY/agents/auditor-seguridad.md" securityAuditor
 
       # La tarjeta de la tarea pasa a «En curso» en sus Projects (HU-EJE-10, ADR 0063 del harness), con tarjetas.py del
       # núcleo. El token de la App solo puede escribir en los Projects de la organización y leer las issues; lo usa solo
@@ -630,6 +634,13 @@ jobs:
           # suma a sus lanzamientos al registrar los intentos de la tarea (harness#776). Va en su propia marca: la de la
           # tarea la leen tal cual la retrospectiva y el informe de la ejecución.
           intento=$(find "$RUNNER_TEMP" -maxdepth 1 -name 'salida-*.json' | wc -l | tr -d ' ')
+          # La subissue de la tarea (EN-EJE-05, ADR 0061 del harness): integrar la PR la cierra y su tarjeta pasa a
+          # «Hecho». Sale de providers.github.items de backlog.json, que escribe la publicación del plan técnico, y solo
+          # si ese backlog se publicó en este repositorio: un «Closes #n» de otro cerraría otra issue. Lo escribe el job,
+          # nunca el modelo. Sin subissue (destino local, plan sin publicar), la PR no lleva ningún «Closes».
+          subissue=$(jq -r --arg repo "$repo" --arg tarea "$TAREA" \
+            '(.providers.github // {}) | select(((.owner // "") + "/" + (.repo // "") | ascii_downcase) == ($repo | ascii_downcase)) | (.items // {})[$tarea].number // empty' \
+            ".diverger/$INICIATIVA/backlog.json" 2>/dev/null || true)
           {
             echo "<!-- diverger:task=$TAREA;run=$EJECUCION -->"
             echo "<!-- diverger:intento=$intento -->"
@@ -637,6 +648,10 @@ jobs:
             echo
             echo "Lanzado por @$LANZADO_POR. Job del worker: $GITHUB_SERVER_URL/$repo/actions/runs/$GITHUB_RUN_ID"
             echo
+            if [[ "$subissue" =~ ^[1-9][0-9]{0,9}$ ]]; then
+              echo "Closes #$subissue"
+              echo
+            fi
             if [ -s "$RUNNER_TEMP/solo-marca" ]; then
               echo "**Solo marca la tarea como hecha.** El worker no ha cambiado código porque dice que otra tarea ya la cubre. Revisa que sea así antes de integrarla:"
               echo

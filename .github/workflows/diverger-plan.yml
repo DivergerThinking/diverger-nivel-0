@@ -142,6 +142,11 @@ jobs:
           persona=$(grep -E '^Diverger-Iniciado-por:[ 	]*[A-Za-z0-9][A-Za-z0-9-]{0,38}[ 	]*$' "$RUNNER_TEMP/commits" \
             | sed -E 's/^Diverger-Iniciado-por:[ 	]*//; s/[ 	]*$//' | sort -u)
           [[ "$persona" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] && opciones+=(-f "lanzado-por=$persona")
+          # El identificador de la ejecución de la sesión que subió el plan: con él, el bucle firma sus issues, su
+          # telemetría y su expediente igual que la sesión, en vez de inventarse otro (harness#1137). Solo si hay uno.
+          ejecucion=$(grep -E '^Diverger-Ejecucion:[ 	]*[0-9a-f]{8}[ 	]*$' "$RUNNER_TEMP/commits" \
+            | sed -E 's/^Diverger-Ejecucion:[ 	]*//; s/[ 	]*$//' | sort -u)
+          [[ "$ejecucion" =~ ^[0-9a-f]{8}$ ]] && opciones+=(-f "ejecucion=$ejecucion")
           gh workflow run diverger-bucle.yml -R "$repo" --ref "$BASE" "${opciones[@]}" \
             || fallar "No se ha podido lanzar el bucle de $iniciativa"
           decir "Bucle de $iniciativa lanzado en $BASE al integrarse la PR #$NUMERO del plan."
