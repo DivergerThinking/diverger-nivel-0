@@ -73,8 +73,9 @@ describe("forma de diverger-plan.yml", () => {
     expect(abrir?.run).toContain("--auto --merge --delete-branch");
   });
 
-  it("el bucle admite la entrada con quien subió el plan", () => {
+  it("el bucle admite las entradas con quien subió el plan y con el identificador de la ejecución", () => {
     expect(BUCLE.on.workflow_dispatch.inputs["lanzado-por"]).toMatchObject({ required: false, type: "string" });
+    expect(BUCLE.on.workflow_dispatch.inputs.ejecucion).toMatchObject({ required: false, type: "string" });
   });
 });
 
@@ -119,6 +120,22 @@ describe.skipIf(process.platform === "win32")("lanzar el bucle al integrarse la 
     expect(r.lanzados.trim()).toBe("workflow run diverger-bucle.yml -R DivergerThinking/app-de-prueba --ref main "
       + "-f initiative=prestamos -f lanzado-por=joselcs");
     expect(r.resumen).toContain("Bucle de prestamos lanzado en main al integrarse la PR #12 del plan.");
+  });
+
+  it("lanza el bucle con el identificador de la ejecución de la sesión, si el plan lo trae (harness#1137)", () => {
+    // diverger-nivel-1, 25/11/2026: el bucle llegó con EJECUCION vacía y firmó con ac8add6a, no con e3c7bd33.
+    const r = lanzar({ GH_COMMITS: `${COMMIT}\nDiverger-Ejecucion: e3c7bd33` });
+    expect(r.codigo).toBe(0);
+    expect(r.lanzados.trim()).toBe("workflow run diverger-bucle.yml -R DivergerThinking/app-de-prueba --ref main "
+      + "-f initiative=prestamos -f lanzado-por=joselcs -f ejecucion=e3c7bd33");
+  });
+
+  it("sin un identificador válido y único, lanza sin él y el bucle pone el suyo", () => {
+    for (const extra of ["Diverger-Ejecucion: no-vale", "Diverger-Ejecucion: e3c7bd33\nDiverger-Ejecucion: ac8add6a"]) {
+      const r = lanzar({ GH_COMMITS: `${COMMIT}\n${extra}` });
+      expect(r.codigo).toBe(0);
+      expect(r.lanzados).not.toContain("ejecucion=");
+    }
   });
 
   it("vale la rama con el sufijo que da el núcleo cuando la del plan ya existía", () => {

@@ -10,12 +10,15 @@ import { parse } from "yaml";
 const RAIZ = join(import.meta.dirname, "..", "..");
 const TEXTO = readFileSync(join(RAIZ, ".github", "workflows", "diverger-bucle.yml"), "utf8");
 const SIN_COMENTARIOS = TEXTO.split("\n").filter((linea) => !linea.trimStart().startsWith("#")).join("\n");
-// La comprobación previa (EN-GP-04) es el único paso que recibe el secreto de Anthropic y la variable de la cuenta de
-// despliegue, solo para ver que no están vacíos: el resto del workflow no los nombra.
+// El job «analisis» (HU-EJE-11, ADR 0078 del harness) sí lanza un modelo, aparte del bucle: lo que se dice aquí del
+// bucle vale para su job, el texto hasta el del análisis.
+const INICIO_ANALISIS = SIN_COMENTARIOS.indexOf("\n  analisis:\n");
+const BUCLE = INICIO_ANALISIS > 0 ? SIN_COMENTARIOS.slice(0, INICIO_ANALISIS) : SIN_COMENTARIOS;
+// La comprobación previa (EN-GP-04) es el único paso del bucle que recibe el secreto de Anthropic y la variable de la
+// cuenta de despliegue, solo para ver que no están vacíos: el resto del job no los nombra.
 const PREVIA = "Comprobación previa del secreto y las variables";
-const INICIO_PREVIA = SIN_COMENTARIOS.indexOf(`      - name: ${PREVIA}\n`);
-const SIN_PREVIA = SIN_COMENTARIOS.slice(0, INICIO_PREVIA)
-  + SIN_COMENTARIOS.slice(SIN_COMENTARIOS.indexOf("\n      - ", INICIO_PREVIA + 1));
+const INICIO_PREVIA = BUCLE.indexOf(`      - name: ${PREVIA}\n`);
+const SIN_PREVIA = BUCLE.slice(0, INICIO_PREVIA) + BUCLE.slice(BUCLE.indexOf("\n      - ", INICIO_PREVIA + 1));
 
 interface Paso {
   name?: string;
@@ -32,7 +35,8 @@ const WF = parse(TEXTO) as {
   on: { workflow_dispatch: { inputs: Record<string, { required: boolean; type: string; default?: unknown }> } };
   permissions: Record<string, string>;
   concurrency: { group: string; "cancel-in-progress": boolean };
-  jobs: Record<string, { permissions?: Record<string, string>; env: Record<string, string>; steps: Paso[] }>;
+  jobs: Record<string, { permissions?: Record<string, string>; env: Record<string, string>; steps: Paso[];
+    needs?: string; if?: string; outputs?: Record<string, string> }>;
 };
 const JOB = WF.jobs.bucle ?? { env: {}, steps: [] };
 const PASOS = JOB.steps;
@@ -47,7 +51,7 @@ describe("workflow del bucle desatendido", () => {
   it("se lanza a mano con la iniciativa, los workers a la vez y el reinicio", () => {
     expect(Object.keys(WF.on)).toEqual(["workflow_dispatch"]);
     const entradas = WF.on.workflow_dispatch.inputs;
-    expect(Object.keys(entradas)).toEqual(["initiative", "max-workers", "restart", "lanzado-por"]);
+    expect(Object.keys(entradas)).toEqual(["initiative", "max-workers", "restart", "lanzado-por", "ejecucion"]);
     expect(entradas.initiative).toMatchObject({ required: true, type: "string" });
     expect(WF["run-name"]).toBe("diverger-bucle ${{ inputs.initiative }}");
   });
@@ -60,6 +64,14 @@ describe("workflow del bucle desatendido", () => {
     const bucle = paso("Bucle").run ?? "";
     expect(bucle).toContain('[ -n "$MAX_WORKERS" ] && opciones+=(--max-workers "$MAX_WORKERS")');
     expect(bucle).not.toContain('--max-workers "$MAX_WORKERS" --project');
+  });
+
+  it("sigue con el identificador de la ejecución de la sesión, el del nombre de su Project (harness HU-GP-06)", () => {
+    expect(WF.on.workflow_dispatch.inputs.ejecucion).toMatchObject({ required: false, type: "string", default: "" });
+    const validar = paso("Validar las entradas").run ?? "";
+    expect(validar).toContain('[[ -z "$EJECUCION" || "$EJECUCION" =~ ^[0-9a-f]{8}$ ]]');
+    const bucle = paso("Bucle").run ?? "";
+    expect(bucle).toContain('[ -n "$EJECUCION" ] && opciones+=(--run-id "$EJECUCION")');
   });
 
   it("un solo bucle por iniciativa, sin cancelar el que está en marcha", () => {
@@ -96,7 +108,7 @@ describe("workflow del bucle desatendido", () => {
     expect(registrar["continue-on-error"]).toBe(true);
     expect(registrar.run).toContain("gcloud logging write diverger-ejecucion \"$linea\" --payload-type=json");
     // gcloud solo escribe ese log: nada de despliegues ni de lecturas de GCP.
-    expect(SIN_COMENTARIOS.match(/gcloud [a-z-]+ [a-z-]+/g)).toEqual(["gcloud logging write"]);
+    expect(BUCLE.match(/gcloud [a-z-]+ [a-z-]+/g)).toEqual(["gcloud logging write"]);
   });
 
   it("registra el arranque solo si consiguió el token de GCP (harness#536)", () => {
@@ -148,5 +160,67 @@ describe("workflow del bucle desatendido", () => {
     expect(orden).toContain('--repo "$GITHUB_REPOSITORY" --base "$GITHUB_REF_NAME"');
     expect(orden).toContain("--restart");
     expect(paso("Ocultar el núcleo a git").run).toContain(".git/info/exclude");
+  });
+});
+
+describe("análisis de las tareas bloqueadas (HU-EJE-11, ADR 0078 del harness)", () => {
+  const ANALISIS = WF.jobs.analisis ?? { env: {}, steps: [] };
+  const pasoAnalisis = (nombre: string): Paso & { if?: string } => {
+    const p = ANALISIS.steps.find((x) => x.name === nombre || x.id === nombre);
+    if (!p) throw new Error(`Falta el paso «${nombre}» del análisis`);
+    return p;
+  };
+
+  it("va en un job aparte, después del bucle, y solo si se subió su run.json", () => {
+    expect(JOB.outputs).toEqual({ estado: "${{ steps.estado.outcome }}" });
+    expect(ANALISIS.needs).toBe("bucle");
+    expect(ANALISIS.if).toBe("always() && needs.bucle.outputs.estado == 'success'");
+    expect(ANALISIS.permissions).toEqual({ contents: "read", "id-token": "write", issues: "write" });
+    const descarga = ANALISIS.steps.find((p) => p.uses?.startsWith("actions/download-artifact@"));
+    expect(descarga?.with).toMatchObject({ name: "diverger-bucle-${{ inputs.initiative }}" });
+  });
+
+  it("solo lanza el agente si el bucle dejó tareas bloqueadas", () => {
+    expect(pasoAnalisis("pendientes").run).toContain('bloqueos.py" pendientes');
+    for (const nombre of ["Plugin del analista de bloqueos", "claude", "Analizar los bloqueos", "Comentar las correcciones"]) {
+      expect(pasoAnalisis(nombre).if).toMatch(/^steps\.pendientes\.outputs\.tareas != ''/);
+    }
+    // El plugin solo lleva el agente, sin los hooks ni el servidor MCP del núcleo.
+    expect(pasoAnalisis("Plugin del analista de bloqueos").run).toContain("agents/analista-bloqueos.md");
+  });
+
+  it("la clave de Anthropic solo está en el paso del agente, que no tiene token de GitHub ni de GCP", () => {
+    const conClave = ANALISIS.steps.filter((p) => JSON.stringify(p).includes("ANTHROPIC_API_KEY"));
+    expect(conClave.map((p) => p.name)).toEqual(["Analizar los bloqueos"]);
+    const analizar = pasoAnalisis("Analizar los bloqueos");
+    expect(Object.keys(analizar.env ?? {})).not.toContain("GH_TOKEN");
+    expect(analizar.run).toBe("bash .github/diverger/bucle-analisis.sh analizar");
+    expect(analizar["continue-on-error"]).toBe(true);
+    // El GITHUB_TOKEN del job, que solo escribe issues, solo comenta: ese paso no lanza ningún modelo.
+    expect(pasoAnalisis("Comentar las correcciones").env).toEqual({ GH_TOKEN: "${{ github.token }}",
+      TAREAS: "${{ steps.pendientes.outputs.tareas }}" });
+    expect(pasoAnalisis("Comentar las correcciones").run).toBe("bash .github/diverger/bucle-analisis.sh registrar");
+    // El agente solo lee: el script lo lanza con Read, Glob y Grep, un tope por tarea y sin los tokens del job.
+    const script = readFileSync(join(RAIZ, ".github", "diverger", "bucle-analisis.sh"), "utf8");
+    expect(script).toContain("--agent diverger:analista-bloqueos");
+    expect(script).toContain('--tools "Read,Glob,Grep"');
+    expect(script).toContain('--max-budget-usd "$TOPE_TAREA"');
+    expect(script).toContain("unset GH_TOKEN GITHUB_TOKEN");
+  });
+
+  it("registra las correcciones con la cuenta de telemetría, sin fallar el job si no puede", () => {
+    const auth = ANALISIS.steps.filter((p) => p.uses?.startsWith("google-github-actions/auth@"));
+    expect(auth.map((p) => p.with)).toEqual([{ workload_identity_provider: "${{ vars.GCP_WIF_PROVIDER }}",
+      service_account: "${{ vars.GCP_TELEMETRY_SA }}" }]);
+    const registrar = pasoAnalisis("Registrar las correcciones");
+    expect(registrar["continue-on-error"]).toBe(true);
+    expect(registrar.run).toContain('gcloud logging write diverger-ejecucion "$linea" --payload-type=json');
+    // gcloud solo escribe ese log: nada de despliegues ni de lecturas de GCP.
+    expect(SIN_COMENTARIOS.slice(INICIO_ANALISIS).match(/gcloud [a-z-]+ [a-z-]+/g)).toEqual(["gcloud logging write"]);
+  });
+
+  it("valida las entradas y nunca las pega en un script", () => {
+    expect(ANALISIS.steps[0]?.name).toBe("Validar las entradas");
+    for (const p of ANALISIS.steps) expect(p.run ?? "").not.toContain("${{");
   });
 });

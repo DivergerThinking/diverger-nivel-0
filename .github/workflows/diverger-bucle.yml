@@ -41,6 +41,11 @@ on:
         required: false
         type: string
         default: ""
+      ejecucion:
+        description: Solo lo rellena launch_unattended con el identificador de la ejecución de la sesión, el del nombre de su Project; a mano se deja vacío
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -54,6 +59,9 @@ jobs:
   bucle:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    # Para el job «analisis»: solo analiza si se recuperó el estado y, por tanto, se subió el run.json del bucle.
+    outputs:
+      estado: ${{ steps.estado.outcome }}
     permissions:
       contents: read
       id-token: write # Solo para la cuenta de telemetría: la comprobación previa, el arranque y el final (ADR 0017).
@@ -68,6 +76,7 @@ jobs:
       INICIATIVA: ${{ inputs.initiative }}
       MAX_WORKERS: ${{ inputs.max-workers }}
       REINICIAR: ${{ inputs.restart }}
+      EJECUCION: ${{ inputs.ejecucion }}
       NUCLEO_REF: ${{ vars.DIVERGER_HARNESS_REF || 'main' }}
       TELEMETRIA: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_TELEMETRY_SA != '' }}
       GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
@@ -77,6 +86,7 @@ jobs:
           fallar() { echo "::error::$1"; exit 1; }
           [[ "$INICIATIVA" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] || fallar "La iniciativa «$INICIATIVA» no es válida"
           [[ -z "$MAX_WORKERS" || "$MAX_WORKERS" =~ ^[1-3]$ ]] || fallar "max-workers tiene que estar vacío o ser un entero entre 1 y 3"
+          [[ -z "$EJECUCION" || "$EJECUCION" =~ ^[0-9a-f]{8}$ ]] || fallar "ejecucion tiene que estar vacía o tener 8 cifras hexadecimales"
           [[ "$NUCLEO_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || fallar "DIVERGER_HARNESS_REF no es válida"
       # La rama base, con el GITHUB_TOKEN del job guardado para que el bucle haga git pull. Ese token puede escribir en
       # Actions e issues de este repositorio, lo mismo que hace el bucle; en el contenido, solo leer.
@@ -163,6 +173,9 @@ jobs:
           # El límite de workers de código es el del proyecto (maxCodeWorkers, ADR 0035); la entrada solo lo baja.
           [ -n "$MAX_WORKERS" ] && opciones+=(--max-workers "$MAX_WORKERS")
           [ "$REINICIAR" = "true" ] && opciones+=(--restart)
+          # La ejecución que empezó en la sesión (HU-GP-06, ADR 0061 del harness): el bucle sigue con su identificador, el
+          # del nombre de su Project. Un run.json del bucle ya guardado conserva el suyo.
+          [ -n "$EJECUCION" ] && opciones+=(--run-id "$EJECUCION")
           [ "$GCP_ARRANQUE" = "success" ] && opciones+=(--log-project "$GCP_PROJECT_ID")
           [[ "$LANZADO_POR" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] && opciones+=(--notify "$LANZADO_POR")
           set +e
@@ -205,3 +218,122 @@ jobs:
             gcloud logging write diverger-ejecucion "$linea" --payload-type=json --project "$GCP_PROJECT_ID" --quiet
           done < "$resultados"
           echo "Registradas $(wc -l < "$resultados") filas en el log diverger-ejecucion"
+
+  # Análisis de las tareas bloqueadas (HU-EJE-11, ADR 0078 del harness). El bucle no ejecuta ningún modelo (ADR 0016):
+  # este job aparte lanza, solo si el bucle dejó tareas bloqueadas, el agente analista-bloqueos del núcleo, que propone
+  # en una línea la corrección de cada una. La clave de Anthropic solo está en el paso que lo lanza, que no tiene token
+  # de GitHub ni de GCP; la corrección se comenta en la issue de la tarea con el GITHUB_TOKEN del job, que solo escribe
+  # issues, y va al log diverger-ejecucion con la cuenta de telemetría. Si algo falla, el job no falla por eso: el
+  # bloqueo se queda «pendiente de corrección».
+  analisis:
+    needs: bucle
+    if: always() && needs.bucle.outputs.estado == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # Solo para la cuenta de telemetría, al registrar las filas.
+      issues: write # Para comentar la corrección en la issue de cada tarea bloqueada.
+    env:
+      INICIATIVA: ${{ inputs.initiative }}
+      NUCLEO_REF: ${{ vars.DIVERGER_HARNESS_REF || 'main' }}
+      TELEMETRIA: ${{ vars.GCP_WIF_PROVIDER != '' && vars.GCP_TELEMETRY_SA != '' }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      NUCLEO: .diverger-nucleo
+    steps:
+      - name: Validar las entradas
+        run: |
+          fallar() { echo "::error::$1"; exit 1; }
+          [[ "$INICIATIVA" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]] || fallar "La iniciativa «$INICIATIVA» no es válida"
+          [[ "$NUCLEO_REF" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || fallar "DIVERGER_HARNESS_REF no es válida"
+          # El contexto runner no existe en el env del job: la carpeta del análisis se fija aquí.
+          echo "ANALISIS=$RUNNER_TEMP/analisis" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Token de lectura del núcleo
+        id: token-nucleo
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.DIVERGER_HARNESS_APP_ID }}
+          private-key: ${{ secrets.DIVERGER_HARNESS_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: Diverger-ExP-Harness
+          permission-contents: read
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/Diverger-ExP-Harness
+          ref: ${{ env.NUCLEO_REF }}
+          token: ${{ steps.token-nucleo.outputs.token }}
+          path: .diverger-nucleo
+          persist-credentials: false
+          sparse-checkout: |
+            plugins/diverger/agents
+            plugins/diverger/server
+      # El run.json que subió el job «bucle» en esta misma ejecución.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          name: diverger-bucle-${{ inputs.initiative }}
+          path: ${{ runner.temp }}/bucle
+      - name: Tareas bloqueadas
+        id: pendientes
+        run: |
+          tareas=$(python3 "$NUCLEO/plugins/diverger/server/bloqueos.py" pendientes --project "$GITHUB_WORKSPACE" \
+            --initiative "$INICIATIVA" --run-json "$RUNNER_TEMP/bucle/run.json" --out "$ANALISIS" | paste -sd ' ')
+          echo "tareas=$tareas" >> "$GITHUB_OUTPUT"
+          if [ -n "$tareas" ]; then echo "Tareas bloqueadas que analizar: $tareas"; else echo "Ninguna tarea bloqueada: no hay nada que analizar"; fi
+      # Del núcleo solo hace falta el agente: va en un plugin con el nombre del núcleo y sin nada más, para que no se
+      # carguen sus hooks ni su servidor MCP, como el revisor de código en diverger-worker.yml.
+      - name: Plugin del analista de bloqueos
+        if: steps.pendientes.outputs.tareas != ''
+        run: |
+          plugin="$RUNNER_TEMP/plugin-analista"
+          mkdir -p "$plugin/.claude-plugin" "$plugin/agents"
+          echo '{"name": "diverger"}' > "$plugin/.claude-plugin/plugin.json"
+          cp "$NUCLEO/plugins/diverger/agents/analista-bloqueos.md" "$plugin/agents/"
+          # Opus por defecto, o el que fija el proyecto en models.blockingAnalyst (harness#1107, ADR 0081).
+          bash .github/diverger/modelo-agente.sh "$plugin/agents/analista-bloqueos.md" blockingAnalyst
+          echo "PLUGIN_NUCLEO=$plugin" >> "$GITHUB_ENV"
+      - name: Instalar Claude Code
+        id: claude
+        if: steps.pendientes.outputs.tareas != ''
+        run: |
+          npm install -g @anthropic-ai/claude-code@2.1.296
+          echo "bin=$(npm prefix -g)/bin" >> "$GITHUB_OUTPUT"
+      - name: Analizar los bloqueos
+        if: steps.pendientes.outputs.tareas != ''
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          CLAUDE_BIN: ${{ steps.claude.outputs.bin }}
+          TAREAS: ${{ steps.pendientes.outputs.tareas }}
+          BASH_ENV: ""
+          ENV: ""
+        run: bash .github/diverger/bucle-analisis.sh analizar
+      - name: Comentar las correcciones
+        if: steps.pendientes.outputs.tareas != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAREAS: ${{ steps.pendientes.outputs.tareas }}
+        run: bash .github/diverger/bucle-analisis.sh registrar
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        if: steps.pendientes.outputs.tareas != '' && env.TELEMETRIA == 'true'
+        continue-on-error: true
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_TELEMETRY_SA }}
+      - name: Registrar las correcciones
+        if: steps.pendientes.outputs.tareas != '' && env.TELEMETRIA == 'true'
+        continue-on-error: true
+        run: |
+          filas="$ANALISIS/filas.jsonl"
+          [ -s "$filas" ] || { echo "Ninguna corrección que registrar"; exit 0; }
+          while IFS= read -r linea; do
+            [ -n "$linea" ] || continue
+            gcloud logging write diverger-ejecucion "$linea" --payload-type=json --project "$GCP_PROJECT_ID" --quiet
+          done < "$filas"
+          echo "Registradas $(grep -c . "$filas") filas en el log diverger-ejecucion"
