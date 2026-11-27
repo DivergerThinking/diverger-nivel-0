@@ -43,6 +43,9 @@ describe("forma de diverger-tarjeta.yml", () => {
     expect(JOB.if).toContain("github.event.pull_request.merged == true");
     expect(JOB.if).toContain("github.event.pull_request.head.repo.full_name == github.repository");
     expect(JOB.if).toContain("startsWith(github.event.pull_request.head.ref, 'diverger/')");
+    // El environment diverger-app solo admite main (harness#660): con otra rama base, GitHub no lanzaría el job y la
+    // integración quedaría con un job en rojo. Se salta antes, como cualquier PR que no es de una tarea.
+    expect(JOB.if).toContain("github.event.pull_request.base.ref == github.event.repository.default_branch");
   });
 
   it("sin permisos en el workflow y solo lectura del contenido en el job", () => {

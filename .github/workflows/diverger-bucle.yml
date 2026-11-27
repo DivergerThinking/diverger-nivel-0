@@ -59,6 +59,11 @@ jobs:
   bucle:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    # La clave de la App es un secreto del environment diverger-app, que solo admite main (G2, harness#660, ADR 0037 del
+    # harness): un workflow subido en otra rama no la lee. deployment: false, porque el job no despliega nada.
+    environment:
+      name: diverger-app
+      deployment: false
     # Para el job «analisis»: solo analiza si se recuperó el estado y, por tanto, se subió el run.json del bucle.
     outputs:
       estado: ${{ steps.estado.outcome }}
@@ -230,6 +235,11 @@ jobs:
     if: always() && needs.bucle.outputs.estado == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Usa la clave de la App, como el job bucle: va en el mismo environment, que solo admite main (G2, harness#660,
+    # ADR 0037 del harness). deployment: false, porque no despliega nada.
+    environment:
+      name: diverger-app
+      deployment: false
     permissions:
       contents: read
       id-token: write # Solo para la cuenta de telemetría, al registrar las filas.

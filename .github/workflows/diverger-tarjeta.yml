@@ -21,9 +21,15 @@ jobs:
     if: >-
       github.event.pull_request.merged == true &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      startsWith(github.event.pull_request.head.ref, 'diverger/')
+      startsWith(github.event.pull_request.head.ref, 'diverger/') &&
+      github.event.pull_request.base.ref == github.event.repository.default_branch
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # La clave de la App es un secreto del environment diverger-app, que solo admite main (G2, harness#660, ADR 0037 del
+    # harness): un workflow subido en otra rama no la lee. deployment: false, porque el job no despliega nada.
+    environment:
+      name: diverger-app
+      deployment: false
     permissions:
       contents: read # Solo para leer .diverger/settings.json de la rama base: el idioma de los mensajes.
     env:

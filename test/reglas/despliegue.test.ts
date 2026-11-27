@@ -33,6 +33,10 @@ const workflows = readdirSync(WORKFLOWS)
   .filter((nombre) => /\.ya?ml$/.test(nombre))
   .map((nombre) => ({ nombre, texto: readFileSync(join(WORKFLOWS, nombre), "utf8") }));
 
+// El único environment que puede tener: diverger-app, el de la clave de la App (harness#660). No es el de staging, el
+// único que acepta la cuenta de despliegue.
+const ENTORNO_APP = "    environment:\n      name: diverger-app\n      deployment: false\n";
+
 const ci = leer(".github/workflows/ci.yml");
 const despliegue = jobs(ci).despliegue ?? "";
 
@@ -203,10 +207,10 @@ describe("los workers no pueden desplegar", () => {
     }
   });
 
-  it("ningún job que lanza Claude Code está en el environment staging ni usa la cuenta de despliegue", () => {
+  it("ningún job que lanza Claude Code está en otro environment que diverger-app ni usa la cuenta de despliegue", () => {
     const conAgente = todos.filter(({ cuerpo }) => /anthropics\/claude-code-action|\bclaude -p\b|@anthropic-ai\/claude-code/.test(cuerpo));
     for (const { nombre, job, cuerpo } of conAgente) {
-      expect(cuerpo, `${nombre}/${job}`).not.toMatch(/environment:|GCP_DEPLOY_SA/);
+      expect(cuerpo.replace(ENTORNO_APP, ""), `${nombre}/${job}`).not.toMatch(/environment:|GCP_DEPLOY_SA/);
     }
   });
 
@@ -218,11 +222,58 @@ describe("los workers no pueden desplegar", () => {
     for (const { nombre, job, cuerpo } of conAgente.filter(({ cuerpo }) => /^ {6}id-token: write\b/m.test(cuerpo))) {
       const cuentas = [...cuerpo.matchAll(/service_account: (.+)$/gm)].map((m) => m[1]?.trim());
       expect(cuentas, `${nombre}/${job}`).toEqual(["${{ vars.GCP_TELEMETRY_SA }}"]);
-      expect(cuerpo, `${nombre}/${job}`).not.toMatch(/^ {4}environment:/m);
+      expect(cuerpo.replace(ENTORNO_APP, ""), `${nombre}/${job}`).not.toMatch(/^ {4}environment:/m);
     }
   });
 
   it("el job despliegue no lanza Claude Code", () => {
     expect(despliegue).not.toMatch(/claude/i);
+  });
+});
+
+// G2 de la auditoría de seguridad del harness (harness#660, ADR 0037 del harness): la clave de la GitHub App es un
+// secreto del environment diverger-app, que solo admite la rama main, y no del repositorio. Un workflow subido en otra
+// rama no la lee: GitHub solo da los secretos de un environment a los jobs que lo nombran, y compara su regla de ramas
+// con el GITHUB_REF de la ejecución. Con deployment: false no se crea un despliegue en cada job; que la regla de ramas
+// siga valiendo así lo da a entender GitHub, y lo comprobará la prueba real de harness#660, todavía pendiente.
+describe("la clave de la App solo en el environment diverger-app", () => {
+  const todos = workflows.flatMap(({ nombre, texto }) =>
+    Object.entries(jobs(texto)).map(([job, cuerpo]) => ({ nombre, job, cuerpo })),
+  );
+  const BLOQUE_APP = /^ {4}environment:\n {6}name: diverger-app\n {6}deployment: false$/m;
+
+  // El job abrir de diverger-plan.yml corre con el push de una rama plan/**, no en main, así que no puede estar en
+  // diverger-app. Mientras sea así, clave-app de titular.ps1 deja el secreto del repositorio y la G2 sigue abierta en
+  // los niveles: se cierra cuando ese job se lance desde main (harness#660, harness#711).
+  const FUERA_DEL_ENTORNO = ["diverger-plan.yml/abrir"];
+
+  it("los jobs que piden el token de la App son los del bucle y su análisis, el worker, la tarjeta y el plan", () => {
+    const conClave = todos.filter(({ cuerpo }) => cuerpo.includes("secrets.DIVERGER_HARNESS_APP_KEY"));
+    expect(conClave.map(({ nombre, job }) => `${nombre}/${job}`).sort()).toEqual([
+      "diverger-bucle.yml/analisis", "diverger-bucle.yml/bucle", "diverger-plan.yml/abrir", "diverger-tarjeta.yml/hecho",
+      "diverger-worker.yml/worker"]);
+  });
+
+  it("cada job que usa la clave de la App declara el environment diverger-app sin crear un despliegue", () => {
+    for (const { nombre, job, cuerpo } of todos.filter(({ cuerpo }) => cuerpo.includes("secrets.DIVERGER_HARNESS_APP_KEY"))) {
+      if (FUERA_DEL_ENTORNO.includes(`${nombre}/${job}`)) continue;
+      expect(cuerpo, `${nombre}/${job}`).toMatch(BLOQUE_APP);
+    }
+  });
+
+  it("ningún otro job entra en el environment diverger-app", () => {
+    const conEntorno = todos.filter(({ cuerpo }) => cuerpo.includes("diverger-app"));
+    for (const { nombre, job, cuerpo } of conEntorno) {
+      expect(cuerpo, `${nombre}/${job}`).toContain("secrets.DIVERGER_HARNESS_APP_KEY");
+    }
+  });
+
+  // Se tolera la línea del paso previo del bucle (EN-GP-04), que solo mira que la variable con el nombre de la cuenta no
+  // está vacía: es un nombre, no una credencial, y la cuenta de despliegue solo acepta el environment staging.
+  it("un job del environment diverger-app no usa la cuenta de despliegue", () => {
+    for (const { nombre, job, cuerpo } of todos.filter(({ cuerpo }) => BLOQUE_APP.test(cuerpo))) {
+      expect(cuerpo.replace("          GCP_DEPLOY_SA: ${{ vars.GCP_DEPLOY_SA }}\n", ""), `${nombre}/${job}`)
+        .not.toContain("GCP_DEPLOY_SA");
+    }
   });
 });
