@@ -22,6 +22,10 @@ const SCRIPT_AUDITOR = join(RAIZ, ".github", "diverger", "worker-auditor.sh");
 const SCRIPT_REVISOR = join(RAIZ, ".github", "diverger", "worker-revisor.sh");
 const MODELO_SH = readFileSync(SCRIPT_MODELO, "utf8");
 
+// El único environment que puede tener: diverger-app, el de la clave de la App (harness#660). No es el de staging, el
+// único que acepta la cuenta de despliegue.
+const ENTORNO_APP = "    environment:\n      name: diverger-app\n      deployment: false\n";
+
 interface Paso {
   name?: string;
   "continue-on-error"?: boolean;
@@ -84,7 +88,9 @@ describe("forma del workflow del worker", () => {
     expect([...secretos].sort()).toEqual(["ANTHROPIC_API_KEY", "DIVERGER_HARNESS_APP_KEY"]);
     const variablesGcp = new Set([...SIN_COMENTARIOS.matchAll(/vars\.(GCP_[A-Z0-9_]+)/g)].map((m) => m[1]));
     expect([...variablesGcp].sort()).toEqual(["GCP_PROJECT_ID", "GCP_TELEMETRY_SA", "GCP_WIF_PROVIDER"]);
-    expect(SIN_COMENTARIOS).not.toMatch(/GCP_DEPLOY_SA|GCP_RUN_SA|GCP_CLOUDDEPLOY|environment:|credentials_json|gcloud|setup-gcloud/);
+    expect(SIN_COMENTARIOS).toContain(ENTORNO_APP);
+    expect(SIN_COMENTARIOS.replace(ENTORNO_APP, ""))
+      .not.toMatch(/GCP_DEPLOY_SA|GCP_RUN_SA|GCP_CLOUDDEPLOY|environment:|credentials_json|gcloud|setup-gcloud/);
     // La única cuenta que pide es la de telemetría.
     const auth = PASOS.filter((p) => p.uses?.startsWith("google-github-actions/"));
     expect(auth).toHaveLength(1);

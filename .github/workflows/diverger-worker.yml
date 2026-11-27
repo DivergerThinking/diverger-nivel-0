@@ -73,6 +73,11 @@ jobs:
   worker:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # La clave de la App es un secreto del environment diverger-app, que solo admite main (G2, harness#660, ADR 0037 del
+    # harness): un workflow subido en otra rama no la lee. deployment: false, porque el job no despliega nada.
+    environment:
+      name: diverger-app
+      deployment: false
     permissions:
       contents: read
       actions: read # Solo para saber quién lanzó la ejecución (EN-OPS-06).

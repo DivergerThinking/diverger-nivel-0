@@ -20,6 +20,10 @@ const PREVIA = "Comprobación previa del secreto y las variables";
 const INICIO_PREVIA = BUCLE.indexOf(`      - name: ${PREVIA}\n`);
 const SIN_PREVIA = BUCLE.slice(0, INICIO_PREVIA) + BUCLE.slice(BUCLE.indexOf("\n      - ", INICIO_PREVIA + 1));
 
+// El único environment que puede tener: diverger-app, el de la clave de la App (harness#660). No es el de staging, el
+// único que acepta la cuenta de despliegue.
+const ENTORNO_APP = "    environment:\n      name: diverger-app\n      deployment: false\n";
+
 interface Paso {
   name?: string;
   id?: string;
@@ -85,7 +89,8 @@ describe("workflow del bucle desatendido", () => {
     expect(JOB.permissions).toEqual({ contents: "read", "id-token": "write", actions: "write", issues: "write",
       "pull-requests": "write" });
     expect(INICIO_PREVIA).toBeGreaterThan(0);
-    expect(SIN_PREVIA).not.toMatch(/GCP_DEPLOY_SA|environment:/);
+    expect(SIN_PREVIA).toContain(ENTORNO_APP);
+    expect(SIN_PREVIA.replace(ENTORNO_APP, "")).not.toMatch(/GCP_DEPLOY_SA|environment:/);
     const auth = PASOS.filter((p) => p.uses?.startsWith("google-github-actions/auth@") && p.id !== "previa-gcp");
     // Uno para el arranque y otro al terminar: el bucle puede durar más que el token (harness#536).
     expect(auth).toHaveLength(2);
